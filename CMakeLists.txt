@@ -150,6 +150,28 @@ macro(find_graphics)
   endif()
 endmacro(find_graphics)
 
+# Note: Saving CMAKE_MODULE_PATH as CGAL will overwrite it.
+# Reconsider this after CGAL 5.4: https://github.com/CGAL/cgal/pull/6029
+set(ORIGINAL_CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH})
+set(CGAL_DO_NOT_WARN_ABOUT_CMAKE_BUILD_TYPE TRUE)
+find_package(CGAL REQUIRED COMPONENTS Core)
+message(STATUS "CGAL: ${CGAL_MAJOR_VERSION}.${CGAL_MINOR_VERSION}")
+add_definitions(-DENABLE_CGAL)
+if(TARGET CGAL::CGAL)
+  list(APPEND COMMON_LIBRARIES CGAL::CGAL CGAL::CGAL_Core)
+  message(STATUS "CGAL: Using target CGAL::CGAL CGAL::CGAL_Core")
+else()
+  list(APPEND COMMON_LIBRARIES ${CGAL_LIBRARY})
+  list(APPEND COMMON_LIBRARIES ${GMP_LIBRARIES})
+  list(APPEND COMMON_LIBRARIES ${MPFR_LIBRARIES})
+endif()
+# revert any changes to module path from CGAL_Macros.cmake; see note above
+# Commented out code should work in CGAL>= 5.4
+#if (CGAL_MODULE_PATH_IS_SET)
+#  set(CMAKE_MODULE_PATH ${ORIGINAL_CMAKE_MODULE_PATH})
+#endif()
+set(CMAKE_MODULE_PATH ${ORIGINAL_CMAKE_MODULE_PATH})
+
 if (MSVC)
   # Flex lexer options
   set(WINCOMPAT "--wincompat --nounistd")
@@ -235,28 +257,6 @@ else()
 
   find_graphics()
 endif()
-
-# Note: Saving CMAKE_MODULE_PATH as CGAL will overwrite it.
-# Reconsider this after CGAL 5.4: https://github.com/CGAL/cgal/pull/6029
-set(ORIGINAL_CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH})
-set(CGAL_DO_NOT_WARN_ABOUT_CMAKE_BUILD_TYPE TRUE)
-find_package(CGAL REQUIRED COMPONENTS Core)
-message(STATUS "CGAL: ${CGAL_MAJOR_VERSION}.${CGAL_MINOR_VERSION}")
-add_definitions(-DENABLE_CGAL)
-if(TARGET CGAL::CGAL)
-  list(APPEND COMMON_LIBRARIES CGAL::CGAL CGAL::CGAL_Core)
-  message(STATUS "CGAL: Using target CGAL::CGAL CGAL::CGAL_Core")
-else()
-  list(APPEND COMMON_LIBRARIES ${CGAL_LIBRARY})
-  list(APPEND COMMON_LIBRARIES ${GMP_LIBRARIES})
-  list(APPEND COMMON_LIBRARIES ${MPFR_LIBRARIES})
-endif()
-# revert any changes to module path from CGAL_Macros.cmake; see note above
-# Commented out code should work in CGAL>= 5.4
-#if (CGAL_MODULE_PATH_IS_SET)
-#  set(CMAKE_MODULE_PATH ${ORIGINAL_CMAKE_MODULE_PATH})
-#endif()
-set(CMAKE_MODULE_PATH ${ORIGINAL_CMAKE_MODULE_PATH})
 
 find_package(LibZip REQUIRED QUIET)
 message(STATUS "libzip: ${LIBZIP_VERSION}")
