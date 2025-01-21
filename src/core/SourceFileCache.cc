@@ -1,12 +1,14 @@
-#include "SourceFileCache.h"
-#include "StatCache.h"
-#include "SourceFile.h"
-#include "printutils.h"
+#include "core/SourceFileCache.h"
+#include "core/StatCache.h"
+#include "core/SourceFile.h"
+#include "utils/printutils.h"
 #include "openscad.h"
+#include <ctime>
 #include <boost/format.hpp>
 
 #include <cstdio>
 #include <fstream>
+#include <string>
 #include <sys/stat.h>
 #include <algorithm>
 
@@ -75,7 +77,7 @@ std::time_t SourceFileCache::evaluate(const std::string& mainFile, const std::st
 
 #ifdef DEBUG
   // Causes too much debug output
-  //if (!shouldCompile) LOG(message_group::None,Location::NONE,"","Using cached library: %1$s (%2$p)",filename,file);
+  //if (!shouldCompile) LOG(message_group::NONE,,"Using cached library: %1$s (%2$p)",filename,file);
 #endif
 
   // If cache lookup failed (non-existing or old timestamp), compile file
@@ -92,7 +94,7 @@ std::time_t SourceFileCache::evaluate(const std::string& mainFile, const std::st
     {
       std::ifstream ifs(filename.c_str());
       if (!ifs.is_open()) {
-        LOG(message_group::Warning, Location::NONE, "", "Can't open library file '%1$s'\n", filename);
+        LOG(message_group::Warning, "Can't open library file '%1$s'\n", filename);
         return 0;
       }
       text = STR(ifs.rdbuf(), "\n\x03\n", commandline_commands);

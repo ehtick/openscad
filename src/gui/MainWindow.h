@@ -1,26 +1,48 @@
 #pragma once
 
-#include "Editor.h"
-#include "Geometry.h"
-#include "export.h"
-#include "ExportPdfDialog.h"
-#include "memory.h"
-#include "RenderStatistic.h"
-#include "TabManager.h"
-#include "Tree.h"
-#include "UIUtils.h"
-#include "qtgettext.h" // IWYU pragma: keep
-#include "ui_MainWindow.h"
-
+#include <ctime>
+#include <unordered_map>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <QAction>
+#include <QCloseEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QEvent>
+#include <QFile>
+#include <QLabel>
+#include <QList>
+#include <QMap>
+#include <QObject>
+#include <QPoint>
+#include <QString>
+#include <QStringList>
+#include <QTemporaryFile>
+#include <QTimer>
+#include <QUrl>
+#include <QWidget>
 #include <QMainWindow>
 #include <QElapsedTimer>
 #include <QIcon>
 #include <QIODevice>
 #include <QMutex>
+#include <QSoundEffect>
 #include <QTime>
+#include <QSignalMapper>
+
+#include "gui/Editor.h"
+#include "geometry/Geometry.h"
+#include "io/export.h"
+#include "gui/Measurement.h"
+#include "RenderStatistic.h"
+#include "gui/TabManager.h"
+#include "core/Tree.h"
+#include "gui/UIUtils.h"
+#include "gui/qtgettext.h" // IWYU pragma: keep
+#include "gui/qt-obsolete.h" // IWYU pragma: keep
+#include "ui_MainWindow.h"
 
 #ifdef STATIC_QT_SVG_PLUGIN
 #include <QtPlugin>
@@ -56,19 +78,23 @@ public:
   SourceFile *parsed_file; // Last parse for include list
   std::shared_ptr<AbstractNode> absolute_root_node; // Result of tree evaluation
   std::shared_ptr<AbstractNode> root_node; // Root if the root modifier (!) is used
+#ifdef ENABLE_PYTHON
+  bool python_active;
+  std::string trusted_edit_document_name;
+  std::string untrusted_edit_document_name;
+  bool trust_python_file(const std::string& file, const std::string& content);
+#endif
   Tree tree;
   EditorInterface *activeEditor;
   TabManager *tabManager;
 
-#ifdef ENABLE_CGAL
-  shared_ptr<const Geometry> root_geom;
-  class CGALRenderer *cgalRenderer;
-#endif
+  std::shared_ptr<const Geometry> root_geom;
+  std::shared_ptr<Renderer> cgalRenderer;
 #ifdef ENABLE_OPENCSG
-  class OpenCSGRenderer *opencsgRenderer;
+  std::shared_ptr<Renderer> opencsgRenderer;
   std::unique_ptr<class MouseSelector> selector;
 #endif
-  ThrownTogetherRenderer *thrownTogetherRenderer;
+  std::shared_ptr<Renderer> thrownTogetherRenderer;
 
   QString last_compiled_doc;
 
@@ -82,6 +108,9 @@ public:
   QWidget *errorLogDockTitleWidget;
   QWidget *animateDockTitleWidget;
   QWidget *viewportControlTitleWidget;
+  QWidget *fontListDockTitleWidget;
+
+  Measurement meas;
 
   int compileErrors;
   int compileWarnings;
@@ -92,6 +121,8 @@ public:
 private:
   volatile bool isClosing = false;
   void consoleOutputRaw(const QString& msg);
+  void clearAllSelectionIndicators();
+  void setSelectionIndicatorStatus(int nodeIndex, EditorSelectionIndicatorStatus status);
 
 protected:
   void closeEvent(QCloseEvent *event) override;
@@ -105,7 +136,9 @@ private slots:
   void showProgress();
   void openCSGSettingsChanged();
   void consoleOutput(const Message& msgObj);
-  void setCursor();
+  void setSelection(int index);
+  void onHoveredObjectInSelectionMenu();
+  void measureFinished();
   void errorLogOutput(const Message& log_msg);
 
 public:
@@ -120,10 +153,7 @@ public:
   void setLastFocus(QWidget *widget);
   void UnknownExceptionCleanup(std::string msg = "");
 
-  bool isLightTheme();
-
 private:
-  void initActionIcon(QAction *action, const char *darkResource, const char *lightResource);
   void setRenderVariables(ContextHandle<BuiltinContext>& context);
   void updateCompileResult();
   void compile(bool reload, bool forcedone = false);
@@ -134,7 +164,7 @@ private:
   void loadViewSettings();
   void loadDesignSettings();
   void prepareCompile(const char *afterCompileSlot, bool procevents, bool preview);
-  void updateWindowSettings(bool console, bool editor, bool customizer, bool errorLog, bool editorToolbar, bool viewToolbar, bool animate, bool ViewportControlWidget);
+  void updateWindowSettings(bool console, bool editor, bool customizer, bool errorLog, bool editorToolbar, bool viewToolbar, bool animate, bool fontList, bool ViewportControlWidget);
   void saveBackup();
   void writeBackup(QFile *file);
   void show_examples();
@@ -145,6 +175,7 @@ private:
 
   LibraryInfoDialog *library_info_dialog{nullptr};
   FontListDialog *font_list_dialog{nullptr};
+  QSignalMapper *exportformat_mapper;
 
 public slots:
   void updateExportActions();
@@ -161,6 +192,7 @@ private slots:
   void clearRecentFiles();
   void actionSave();
   void actionSaveAs();
+  void actionRevokeTrustedFiles();
   void actionSaveACopy();
   void actionReload();
   void actionShowLibraryFolder();
@@ -193,11 +225,14 @@ private slots:
   void hideParameters();
   void showAnimate();
   void hideAnimate();
+  void showFontList();
+  void hideFontList();
   void on_windowActionSelectEditor_triggered();
   void on_windowActionSelectConsole_triggered();
   void on_windowActionSelectCustomizer_triggered();
   void on_windowActionSelectErrorLog_triggered();
   void on_windowActionSelectAnimate_triggered();
+  void on_windowActionSelectFontList_triggered();
   void on_windowActionSelectViewportControl_triggered();
   void on_windowActionNextWindow_triggered();
   void on_windowActionPreviousWindow_triggered();
@@ -231,31 +266,19 @@ private slots:
   void csgRender();
   void csgReloadRender();
   void action3DPrint();
-  void sendToOctoPrint();
-  void sendToPrintService();
-#ifdef ENABLE_CGAL
+  void sendToExternalTool(class ExternalToolInterface &externalToolService);
   void actionRender();
-  void actionRenderDone(const shared_ptr<const Geometry>&);
+  void actionRenderDone(const std::shared_ptr<const Geometry>&);
   void cgalRender();
-#endif
+  void actionMeasureDistance();
+  void actionMeasureAngle();
   void actionCheckValidity();
   void actionDisplayAST();
   void actionDisplayCSGTree();
   void actionDisplayCSGProducts();
   bool canExport(unsigned int dim);
-  void actionExport(FileFormat format, const char *type_name, const char *suffix, unsigned int dim);
-  void actionExport(FileFormat format, const char *type_name, const char *suffix, unsigned int dim, ExportPdfOptions *options);
-  void actionExportSTL();
-  void actionExport3MF();
-  void actionExportOBJ();
-  void actionExportOFF();
-  void actionExportWRL();
-  void actionExportAMF();
-  void actionExportDXF();
-  void actionExportSVG();
-  void actionExportPDF();
-  void actionExportCSG();
-  void actionExportImage();
+  void actionExport(unsigned int dim, ExportInfo& exportInfo);
+  void actionExportFileFormat(int fmt);
   void actionCopyViewport();
   void actionFlushCaches();
 
@@ -279,10 +302,12 @@ public:
   void changedTopLevelEditor(bool);
   void changedTopLevelErrorLog(bool);
   void changedTopLevelAnimate(bool);
+  void changedTopLevelFontList(bool);
   void changedTopLevelViewportControl(bool);
 
   QList<double> getTranslation() const;
   QList<double> getRotation() const;
+  std::unordered_map<FileFormat, QAction*>  export_map;
 
 public slots:
   void actionReloadRenderPreview();
@@ -291,6 +316,7 @@ public slots:
   void on_parameterDock_visibilityChanged(bool);
   void on_errorLogDock_visibilityChanged(bool);
   void on_animateDock_visibilityChanged(bool);
+  void on_fontListDock_visibilityChanged(bool);
   void on_viewportControlDock_visibilityChanged(bool);
   void on_toolButtonCompileResultClose_clicked();
   void editorTopLevelChanged(bool);
@@ -298,6 +324,7 @@ public slots:
   void parameterTopLevelChanged(bool);
   void errorLogTopLevelChanged(bool);
   void animateTopLevelChanged(bool);
+  void fontListTopLevelChanged(bool);
   void viewportControlTopLevelChanged(bool);
   void processEvents();
   void jumpToLine(int, int);
@@ -306,10 +333,8 @@ public slots:
 #ifdef ENABLE_OPENCSG
   void viewModePreview();
 #endif
-#ifdef ENABLE_CGAL
   void viewModeSurface();
   void viewModeWireframe();
-#endif
   void viewModeThrownTogether();
   void viewModeShowEdges();
   void viewModeShowAxes();
@@ -329,7 +354,8 @@ public slots:
   void viewResetView();
   void viewAll();
   void editorContentChanged();
-  void selectObject(QPoint coordinate);
+  void leftClick(QPoint coordinate);
+  void rightClick(QPoint coordinate);
   void dragEnterEvent(QDragEnterEvent *event) override;
   void dropEvent(QDropEvent *event) override;
   void helpAbout();
@@ -354,11 +380,12 @@ private:
   static QElapsedTimer *progressThrottle;
   QWidget *lastFocus; // keep track of active copyable widget (Editor|Console) for global menu action Edit->Copy
 
-  shared_ptr<CSGNode> csgRoot; // Result of the CSGTreeEvaluator
-  shared_ptr<CSGNode> normalizedRoot; // Normalized CSG tree
-  shared_ptr<CSGProducts> root_products;
-  shared_ptr<CSGProducts> highlights_products;
-  shared_ptr<CSGProducts> background_products;
+  std::shared_ptr<CSGNode> csgRoot; // Result of the CSGTreeEvaluator
+  std::shared_ptr<CSGNode> normalizedRoot; // Normalized CSG tree
+  std::shared_ptr<CSGProducts> root_products;
+  std::shared_ptr<CSGProducts> highlights_products;
+  std::shared_ptr<CSGProducts> background_products;
+  int currently_selected_object {-1};
 
   char const *afterCompileSlot;
   bool procevents{false};
@@ -369,13 +396,16 @@ private:
   EditorInterface *renderedEditor; // stores pointer to editor which has been most recently rendered
   time_t includes_mtime{0}; // latest include mod time
   time_t deps_mtime{0}; // latest dependency mod time
-  std::unordered_map<std::string, QString> export_paths; // for each file type, where it was exported to last
-  QString exportPath(const char *suffix); // look up the last export path and generate one if not found
+  std::unordered_map<QString, QString> export_paths; // for each file type, where it was exported to last
+  QString exportPath(const QString& suffix); // look up the last export path and generate one if not found
   int last_parser_error_pos{-1}; // last highlighted error position
   int tabCount = 0;
-  paperSizes sizeString2Enum(QString current);
-  paperOrientations orientationsString2Enum(QString current);
-  
+  ExportPdfPaperSize sizeString2Enum(const QString& current);
+  ExportPdfPaperOrientation orientationsString2Enum(const QString& current);
+
+  QSoundEffect *renderCompleteSoundEffect;
+  std::vector<std::unique_ptr<QTemporaryFile>> allTempFiles;
+
 signals:
   void highlightError(int);
   void unhighlightLastError();

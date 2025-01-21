@@ -1,11 +1,17 @@
-#include "CGALWorker.h"
+#include "gui/CGALWorker.h"
+#include <exception>
+#include <memory>
 #include <QThread>
 
-#include "Tree.h"
-#include "GeometryEvaluator.h"
-#include "progress.h"
-#include "printutils.h"
-#include "exceptions.h"
+#ifdef ENABLE_MANIFOLD
+#include "geometry/manifold/ManifoldGeometry.h"
+#endif
+
+#include "core/Tree.h"
+#include "geometry/GeometryEvaluator.h"
+#include "core/progress.h"
+#include "utils/printutils.h"
+#include "utils/exceptions.h"
 
 CGALWorker::CGALWorker()
 {
@@ -30,18 +36,28 @@ void CGALWorker::start(const Tree& tree)
 void CGALWorker::work()
 {
   // this is a worker thread: we don't want any exceptions escaping and crashing the app.
-  shared_ptr<const Geometry> root_geom;
+  std::shared_ptr<const Geometry> root_geom;
   try {
     GeometryEvaluator evaluator(*this->tree);
     root_geom = evaluator.evaluateGeometry(*this->tree->root(), true);
+
+#ifdef ENABLE_MANIFOLD
+    if (auto manifold = std::dynamic_pointer_cast<const ManifoldGeometry>(root_geom)) {
+      // calling status forces evaluation
+      // we should complete evaluation within the worker thread, so computation
+      // will not block the GUI.
+      if (manifold->getManifold().Status() != manifold::Manifold::Error::NoError)
+        LOG(message_group::Error, "Rendering cancelled due to unknown manifold error.");
+    }
+#endif
   } catch (const ProgressCancelException& e) {
-    LOG(message_group::None, Location::NONE, "", "Rendering cancelled.");
+    LOG("Rendering cancelled.");
   } catch (const HardWarningException& e) {
-    LOG(message_group::None, Location::NONE, "", "Rendering cancelled on first warning.");
+    LOG("Rendering cancelled on first warning.");
   } catch (const std::exception& e) {
-    LOG(message_group::Error, Location::NONE, "", "Rendering cancelled by exception %1$s", e.what());
+    LOG(message_group::Error, "Rendering cancelled by exception %1$s", e.what());
   } catch (...) {
-    LOG(message_group::Error, Location::NONE, "", "Rendering cancelled by unknown exception.");
+    LOG(message_group::Error, "Rendering cancelled by unknown exception.");
   }
 
   emit done(root_geom);

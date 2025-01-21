@@ -1,3 +1,12 @@
+#include "gui/TabManager.h"
+
+#include <QApplication>
+#include <QPoint>
+#include <QTabBar>
+#include <QWidget>
+#include <cassert>
+#include <functional>
+#include <exception>
 #include <QFileInfo>
 #include <QFile>
 #include <QDir>
@@ -11,12 +20,13 @@
 #include <Qsci/qscicommand.h>
 #include <Qsci/qscicommandset.h>
 
-#include "Editor.h"
-#include "TabManager.h"
-#include "TabWidget.h"
-#include "ScintillaEditor.h"
-#include "Preferences.h"
-#include "MainWindow.h"
+#include "gui/Editor.h"
+#include "gui/TabWidget.h"
+#include "gui/ScintillaEditor.h"
+#include "gui/Preferences.h"
+#include "gui/MainWindow.h"
+
+#include <cstddef>
 
 TabManager::TabManager(MainWindow *o, const QString& filename)
 {
@@ -165,6 +175,7 @@ void TabManager::createTab(const QString& filename)
   assert(par != nullptr);
 
   editor = new ScintillaEditor(tabWidget);
+  Preferences::create(editor->colorSchemes()); // needs to be done only once, however handled
   par->activeEditor = editor;
   editor->parameterWidget = new ParameterWidget(par->parameterDock);
   connect(editor->parameterWidget, SIGNAL(parametersChanged()), par, SLOT(actionRenderPreview()));
@@ -176,8 +187,6 @@ void TabManager::createTab(const QString& filename)
   qcmd->setKey(0);
   qcmd = qcmdset->boundTo(Qt::ControlModifier | Qt::Key_Minus);
   qcmd->setKey(0);
-
-  Preferences::create(editor->colorSchemes()); // needs to be done only once, however handled
 
   connect(editor, SIGNAL(uriDropped(const QUrl&)), par, SLOT(handleFileDrop(const QUrl&)));
   connect(editor, SIGNAL(previewRequest()), par, SLOT(actionRenderPreview()));
@@ -543,13 +552,15 @@ bool TabManager::refreshDocument()
   if (!editor->filepath.isEmpty()) {
     QFile file(editor->filepath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-      LOG(message_group::None, Location::NONE, "", "Failed to open file %1$s: %2$s",
+      LOG("Failed to open file %1$s: %2$s",
           editor->filepath.toLocal8Bit().constData(), file.errorString().toLocal8Bit().constData());
     } else {
       QTextStream reader(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
       reader.setCodec("UTF-8");
+#endif
       auto text = reader.readAll();
-      LOG(message_group::None, Location::NONE, "", "Loaded design '%1$s'.", editor->filepath.toLocal8Bit().constData());
+      LOG("Loaded design '%1$s'.", editor->filepath.toLocal8Bit().constData());
       if (editor->toPlainText() != text) {
         editor->setPlainText(text);
         setContentRenderState(); // since last render
@@ -572,7 +583,7 @@ bool TabManager::maybeSave(int x)
     box.setDefaultButton(QMessageBox::Save);
     box.setIcon(QMessageBox::Warning);
     box.setWindowModality(Qt::ApplicationModal);
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     // Cmd-D is the standard shortcut for this button on Mac
     box.button(QMessageBox::Discard)->setShortcut(QKeySequence("Ctrl+D"));
     box.button(QMessageBox::Discard)->setShortcutEnabled(true);
@@ -604,7 +615,7 @@ bool TabManager::shouldClose()
     box.setDefaultButton(QMessageBox::SaveAll);
     box.setIcon(QMessageBox::Warning);
     box.setWindowModality(Qt::ApplicationModal);
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     // Cmd-D is the standard shortcut for this button on Mac
     box.button(QMessageBox::Discard)->setShortcut(QKeySequence("Ctrl+D"));
     box.button(QMessageBox::Discard)->setShortcutEnabled(true);
@@ -625,7 +636,7 @@ bool TabManager::shouldClose()
 void TabManager::saveError(const QIODevice& file, const std::string& msg, const QString& filepath)
 {
   const char *fileName = filepath.toLocal8Bit().constData();
-  LOG(message_group::None, Location::NONE, "", "%1$s %2$s (%3$s)", msg.c_str(), fileName, file.errorString().toLocal8Bit().constData());
+  LOG("%1$s %2$s (%3$s)", msg.c_str(), fileName, file.errorString().toLocal8Bit().constData());
 
   const std::string dialogFormatStr = msg + "\n\"%1\"\n(%2)";
   const QString dialogFormat(dialogFormatStr.c_str());
@@ -665,7 +676,9 @@ bool TabManager::save(EditorInterface *edt, const QString& path)
   }
 
   QTextStream writer(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
   writer.setCodec("UTF-8");
+#endif
   writer << edt->toPlainText();
   writer.flush();
   bool saveOk = writer.status() == QTextStream::Ok;
@@ -675,7 +688,7 @@ bool TabManager::save(EditorInterface *edt, const QString& path)
     file.cancelWriting();
   }
   if (saveOk) {
-    LOG(message_group::None, Location::NONE, "", "Saved design '%1$s'.", path.toLocal8Bit().constData());
+    LOG("Saved design '%1$s'.", path.toLocal8Bit().constData());
     edt->parameterWidget->saveFile(path);
     edt->setContentModified(false);
     edt->parameterWidget->setModified(false);

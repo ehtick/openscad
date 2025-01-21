@@ -1,8 +1,11 @@
-#include "fileutils.h"
-#include "printutils.h"
+#include "io/fileutils.h"
+#include "utils/printutils.h"
 
-#include <boost/filesystem.hpp>
-namespace fs = boost::filesystem;
+#include <cstdint>
+#include <filesystem>
+#include <string>
+
+namespace fs = std::filesystem;
 
 /*!
    Returns the absolute path to the given filename, unless it's empty.
@@ -21,7 +24,7 @@ std::string lookup_file(const std::string& filename,
 
     if (!fs::exists(absfile) && fs::exists(absfile_fallback)) {
       resultfile = absfile_fallback.string();
-      LOG(message_group::Deprecated, Location::NONE, "", "Imported file (%1$s) found in document root instead of relative to the importing module. This behavior is deprecated", std::string(filename));
+      LOG(message_group::Deprecated, "Imported file (%1$s) found in document root instead of relative to the importing module. This behavior is deprecated", std::string(filename));
     } else {
       resultfile = absfile.string();
     }
@@ -29,4 +32,24 @@ std::string lookup_file(const std::string& filename,
     resultfile = filename;
   }
   return resultfile;
+}
+
+fs::path fs_uncomplete(fs::path const& p, fs::path const& base)
+{
+  if (p == fs::path{}) return p;
+#ifndef __EMSCRIPTEN__
+  return fs::relative(p, base == fs::path{} ? fs::path{"."} : base);
+#else
+  return p;
+#endif
+}
+
+int64_t fs_timestamp(fs::path const& path) {
+  int64_t seconds = 0;
+  if (fs::exists(path)) {
+    const auto t = fs::last_write_time(path);
+    const auto duration = t.time_since_epoch();
+    seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+  }
+  return seconds;
 }

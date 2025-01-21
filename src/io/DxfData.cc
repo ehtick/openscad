@@ -24,33 +24,37 @@
  *
  */
 
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _USE_MATH_DEFINES
+#include "io/DxfData.h"
+
+#include <stdexcept>
+#include <memory>
 #include <cmath>
 
-#include "DxfData.h"
-#include "Grid.h"
-#include "printutils.h"
-#include "calc.h"
+#include "geometry/Grid.h"
+#include "utils/printutils.h"
+#include "utils/calc.h"
 
-#include <fstream>
 #include <cassert>
+#include <cstddef>
+#include <fstream>
 #include <unordered_map>
+#include <vector>
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/filesystem.hpp>
+#include <filesystem>
 #include <algorithm>
 #include <sstream>
+#include <string>
 #include <map>
 
-#include "Value.h"
-#include "boost-utils.h"
-#include "Polygon2d.h"
-#include "printutils.h"
-#include "degree_trig.h"
+#include "core/Value.h"
+#include "geometry/Polygon2d.h"
+#include "io/fileutils.h"
+#include "utils/printutils.h"
+#include "utils/degree_trig.h"
 
 
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 
 /*! \class DxfData
 
@@ -67,9 +71,10 @@ namespace fs = boost::filesystem;
  */
 
 struct Line {
-  int idx[2]; // indices into DxfData::points
+  int idx[2] = {-1, -1}; // indices into DxfData::points
   bool disabled{false};
-  Line(int i1 = -1, int i2 = -1) : idx{i1, i2} { }
+  Line() = default;
+  Line(int i1, int i2) : idx{i1, i2} { }
 };
 
 /*!
@@ -81,7 +86,7 @@ DxfData::DxfData(double fn, double fs, double fa,
 {
   std::ifstream stream(filename.c_str());
   if (!stream.good()) {
-    LOG(message_group::Warning, Location::NONE, "", "Can't open DXF file '%1$s'.", filename);
+    LOG(message_group::Warning, "Can't open DXF file '%1$s'.", filename);
     return;
   }
 
@@ -145,7 +150,7 @@ DxfData::DxfData(double fn, double fs, double fa,
       id = boost::lexical_cast<int>(id_str);
     } catch (const boost::bad_lexical_cast& blc) {
       if (!stream.eof()) {
-        LOG(message_group::Warning, Location::NONE, "", "Illegal ID '%1$s' in `%2$s'", id_str, filename);
+        LOG(message_group::Warning, "Illegal ID '%1$s' in `%2$s'", id_str, filename);
       }
       break;
     }
@@ -370,19 +375,19 @@ DxfData::DxfData(double fn, double fs, double fa,
         break;
       }
     } catch (boost::bad_lexical_cast& blc) {
-      LOG(message_group::Warning, Location::NONE, "", "Illegal value '%1$s'in `%2$s'", data, filename);
+      LOG(message_group::Warning, "Illegal value '%1$s'in `%2$s'", data, filename);
     } catch (const std::out_of_range& oor) {
-      LOG(message_group::Warning, Location::NONE, "", "Not enough input values for %1$s. in '%2$s'", data, filename);
+      LOG(message_group::Warning, "Not enough input values for %1$s. in '%2$s'", data, filename);
     }
   }
 
   for (const auto& i : unsupported_entities_list) {
     if (layername.empty()) {
-      LOG(message_group::Warning, Location::NONE, "",
-          "Unsupported DXF Entity '%1$s' (%2$x) in %3$s.", i.first, i.second, QuotedString(boostfs_uncomplete(filename, fs::current_path()).generic_string()));
+      LOG(message_group::Warning,
+          "Unsupported DXF Entity '%1$s' (%2$x) in %3$s.", i.first, i.second, QuotedString(fs_uncomplete(filename, fs::current_path()).generic_string()));
     } else {
-      LOG(message_group::Warning, Location::NONE, "",
-          "Unsupported DXF Entity '%1$s' (%2$x) in layer '%3$s' of %4$s", i.first, i.second, layername, boostfs_uncomplete(filename, fs::current_path()).generic_string());
+      LOG(message_group::Warning,
+          "Unsupported DXF Entity '%1$s' (%2$x) in layer '%3$s' of %4$s", i.first, i.second, layername, fs_uncomplete(filename, fs::current_path()).generic_string());
     }
   }
 
@@ -404,8 +409,8 @@ DxfData::DxfData(double fn, double fs, double fa,
         auto lv = grid.data(this->points[lines[idx].idx[j]][0], this->points[lines[idx].idx[j]][1]);
         for (int k : lv) {
           if (k < 0 || static_cast<unsigned int>(k) >= lines.size()) {
-            LOG(message_group::Warning, Location::NONE, "",
-                "Bad DXF line index in %1$s.", QuotedString(boostfs_uncomplete(filename, fs::current_path()).generic_string()));
+            LOG(message_group::Warning,
+                "Bad DXF line index in %1$s.", QuotedString(fs_uncomplete(filename, fs::current_path()).generic_string()));
             continue;
           }
           if (k == idx || lines[k].disabled) continue;
@@ -433,8 +438,8 @@ create_open_path:
       auto lv = grid.data(ref_point[0], ref_point[1]);
       for (int k : lv) {
         if (k < 0 || static_cast<unsigned int>(k) >= lines.size()) {
-          LOG(message_group::Warning, Location::NONE, "",
-              "Bad DXF line index in %1$s.", QuotedString(boostfs_uncomplete(filename, fs::current_path()).generic_string()));
+          LOG(message_group::Warning,
+              "Bad DXF line index in %1$s.", QuotedString(fs_uncomplete(filename, fs::current_path()).generic_string()));
           continue;
         }
         if (lines[k].disabled) continue;
@@ -474,8 +479,8 @@ found_next_line_in_open_path:;
       auto lv = grid.data(ref_point[0], ref_point[1]);
       for (int k : lv) {
         if (k < 0 || static_cast<unsigned int>(k) >= lines.size()) {
-          LOG(message_group::Warning, Location::NONE, "",
-              "Bad DXF line index in %1$s.", QuotedString(boostfs_uncomplete(filename, fs::current_path()).generic_string()));
+          LOG(message_group::Warning,
+              "Bad DXF line index in %1$s.", QuotedString(fs_uncomplete(filename, fs::current_path()).generic_string()));
           continue;
         }
         if (lines[k].disabled) continue;
@@ -503,8 +508,8 @@ found_next_line_in_closed_path:;
   printf("----- DXF Data -----\n");
   for (int i = 0; i < this->paths.size(); ++i) {
     printf("Path %d (%s):\n", i, this->paths[i].is_closed ? "closed" : "open");
-    for (int j = 0; j < this->paths[i].points.size(); ++j)
-      printf("  %f %f\n", (*this->paths[i].points[j])[0], (*this->paths[i].points[j])[1]);
+    for (int j = 0; j < this->paths[i].vertices.size(); ++j)
+      printf("  %f %f\n", (*this->paths[i].vertices[j])[0], (*this->paths[i].vertices[j])[1]);
   }
   printf("--------------------\n");
   fflush(stdout);
@@ -586,9 +591,9 @@ std::string DxfData::dump() const
 /*
     May return an empty polygon, but will not return nullptr
  */
-Polygon2d *DxfData::toPolygon2d() const
+std::unique_ptr<Polygon2d> DxfData::toPolygon2d() const
 {
-  auto poly = new Polygon2d();
+  auto poly = std::make_unique<Polygon2d>();
   for (const auto& path : this->paths) {
     Outline2d outline;
     size_t endidx = path.indices.size();

@@ -1,12 +1,15 @@
 #pragma once
 
-#include <string>
-#include <list>
-#include <iostream>
-#include <boost/format.hpp>
 #include <boost/algorithm/string.hpp>
-#include <utility>
+#include <boost/format.hpp>
+#include <cstddef>
+#include <initializer_list>
+#include <iostream>
+#include <list>
 #include <sstream>
+#include <string>
+#include <tuple>
+#include <utility>
 
 #include <libintl.h>
 // Undefine some defines from libintl.h to presolve
@@ -19,7 +22,7 @@
 #endif
 
 #include <clocale>
-#include "AST.h"
+#include "core/AST.h"
 #include <set>
 
 // It seems standard practice to use underscore for gettext, even though it is reserved.
@@ -43,8 +46,10 @@ inline const char *_(const char *msgid, const char *msgctxt) {
 }
 // NOLINTEND(bugprone-reserved-identifier)
 
+std::string quoteVar(const std::string& varname);
+
 enum class message_group {
-  Error, Warning, UI_Warning, Font_Warning, Export_Warning, Export_Error, UI_Error, Parser_Error, Trace, Deprecated, None, Echo
+  NONE, Error, Warning, UI_Warning, Font_Warning, Export_Warning, Export_Error, UI_Error, Parser_Error, Trace, Deprecated, Echo
 };
 
 
@@ -59,17 +64,17 @@ struct Message {
   enum message_group group;
 
   Message()
-    : msg(""), loc(Location::NONE), docPath(""), group(message_group::None)
+    : msg(""), loc(Location::NONE), docPath(""), group(message_group::NONE)
   {
   }
 
-  Message(std::string msg, Location loc, std::string docPath, message_group group)
+  Message(std::string msg, message_group group = message_group::NONE, Location loc = Location::NONE, std::string docPath = "")
     : msg(std::move(msg)), loc(std::move(loc)), docPath(std::move(docPath)), group(group)
   {
   }
 
   [[nodiscard]] std::string str() const {
-    const auto g = group == message_group::None ? "" : getGroupName(group) + ": ";
+    const auto g = group == message_group::NONE ? "" : getGroupName(group) + ": ";
     const auto l = loc.isNone() ? "" : " " + loc.toRelativeString(docPath);
     return g + msg + l;
   }
@@ -202,7 +207,7 @@ private:
 
 public:
   template <typename ... Args>
-  MessageClass(std::string&& fmt, Args&&... args) : fmt(std::forward<std::string>(fmt)), args(std::forward<Args>(args)...)
+  MessageClass(std::string&& fmt, Args&&... args) : fmt(fmt), args(std::forward<Args>(args)...)
   {
   }
 
@@ -214,17 +219,28 @@ public:
 
 extern std::set<std::string> printedDeprecations;
 
-template <typename F, typename ... Args>
-void LOG(const message_group& msg_grp, Location loc, std::string docPath, F&& f, Args&&... args)
+template <typename ... Args>
+void LOG(const message_group& msgGroup, Location loc, std::string docPath, std::string&& f, Args&&... args)
 {
-  const auto msg = MessageClass<Args...>(std::forward<F>(f), std::forward<Args>(args)...);
-  auto formatted = msg.format();
+  auto formatted = MessageClass<Args...>{std::move(f), std::forward<Args>(args)...}.format();
 
   //check for deprecations
-  if (msg_grp == message_group::Deprecated && printedDeprecations.find(formatted + loc.toRelativeString(docPath)) != printedDeprecations.end()) return;
-  if (msg_grp == message_group::Deprecated) printedDeprecations.insert(formatted + loc.toRelativeString(docPath));
+  if (msgGroup == message_group::Deprecated && printedDeprecations.find(formatted + loc.toRelativeString(docPath)) != printedDeprecations.end()) return;
+  if (msgGroup == message_group::Deprecated) printedDeprecations.insert(formatted + loc.toRelativeString(docPath));
 
-  Message msgObj{std::move(formatted), std::move(loc), std::move(docPath), msg_grp};
+  Message msgObj{std::move(formatted), msgGroup, std::move(loc), std::move(docPath)};
 
   PRINT(msgObj);
+}
+
+template <typename ... Args>
+void LOG(const message_group& msgGroup, std::string&& f, Args&&... args)
+{
+  LOG(msgGroup, Location::NONE, "", std::move(f), std::forward<Args>(args)...);
+}
+
+template <typename ... Args>
+void LOG(std::string&& f, Args&&... args)
+{
+  LOG(message_group::NONE, Location::NONE, "", std::move(f), std::forward<Args>(args)...);
 }
