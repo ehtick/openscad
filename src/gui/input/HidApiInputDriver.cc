@@ -29,21 +29,25 @@
  *  Public Domain.
  */
 
-#include <chrono>
-#include <iomanip>
-#include <bitset>
-#include <fstream>
-#include <ostream>
-#include <codecvt>
-#include <cmath>
-#include <boost/format.hpp>
+#include "gui/input/HidApiInputDriver.h"
 
-#include "Settings.h"
-#include "PlatformUtils.h"
-#include "HidApiInputDriver.h"
-#include "InputDriverEvent.h"
-#include "InputDriverManager.h"
-#include "printutils.h"
+#include <ios>
+#include <sstream>
+#include <cstdint>
+#include <bitset>
+#include <boost/format.hpp>
+#include <chrono>
+#include <cmath>
+#include <codecvt>
+#include <fstream>
+#include <iomanip>
+#include <string>
+
+#include "core/Settings.h"
+#include "platform/PlatformUtils.h"
+#include "gui/input/InputDriverEvent.h"
+#include "gui/input/InputDriverManager.h"
+#include "utils/printutils.h"
 
 static constexpr int BUFLEN = 64;
 static constexpr int MAX_LOG_SIZE = 20 * 1024;
@@ -72,6 +76,7 @@ static const struct device_id device_ids[] = {
   { 0x256f, 0xc631, &HidApiInputDriver::hidapi_decode_axis, &HidApiInputDriver::hidapi_decode_button, "3Dconnexion Space Mouse Pro Wireless (cabled)"},
   { 0x256f, 0xc632, &HidApiInputDriver::hidapi_decode_axis, &HidApiInputDriver::hidapi_decode_button, "3Dconnexion Space Mouse Pro Wireless"},
   { 0x256f, 0xc635, &HidApiInputDriver::hidapi_decode_axis, &HidApiInputDriver::hidapi_decode_button, "3Dconnexion Space Mouse Compact"},
+  { 0x256f, 0xc63a, &HidApiInputDriver::hidapi_decode_axis, &HidApiInputDriver::hidapi_decode_button, "3Dconnexion Space Mouse Wireless BT"},
   // This is reported to be used with a 3Dconnexion Space Mouse Wireless 256f:c62e
   { 0x256f, 0xc652, &HidApiInputDriver::hidapi_decode_axis, &HidApiInputDriver::hidapi_decode_button, "3Dconnexion Universal Receiver"},
   { -1, -1, nullptr, nullptr, nullptr},
@@ -177,7 +182,7 @@ void HidApiInputDriver::hidapi_decode_button(const unsigned char *buf, unsigned 
     const uint16_t current = buf[1] | buf[2] << 8;
 
     const std::bitset<16> bits_curr{current};
-    const std::bitset<16> bits_last{buttons};
+    const std::bitset<16> bits_last{buttons};  // NOLINT
 
     for (int i = 0; i < 16; ++i) {
       if (bits_curr.test(i) != bits_last.test(i)) {

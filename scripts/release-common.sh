@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # This script creates a binary release of OpenSCAD. This should work
 # under Mac OS X, Linux 32bit, Linux 64bit, and Linux->Win32 MXE cross-build.
@@ -97,7 +97,7 @@ fi
 case $OS in
     MACOSX)
         . ./scripts/setenv-macos.sh
-        CMAKE_CONFIG="$CMAKE_CONFIG -DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+        CMAKE_CONFIG="$CMAKE_CONFIG -DUSE_BUILTIN_CLIPPER2=OFF -DUSE_BUILTIN_MANIFOLD=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
     ;;
     LINUX)
         TARGET=
@@ -169,17 +169,7 @@ esac
 
 echo "Checking pre-requisites..."
 
-if [ ! -e $OPENSCADDIR/libraries/MCAD/__init__.py ]; then
-  echo "Downloading MCAD"
-  git submodule init
-  git submodule update
-else
-  echo "MCAD found:" $OPENSCADDIR/libraries/MCAD
-fi
-
-if [ -d .git ]; then
-  git submodule update
-fi
+git submodule update --init --recursive
 
 echo "Building openscad-$VERSION ($VERSIONDATE)"
 echo "  CMake args: $CMAKE_CONFIG"
@@ -333,9 +323,8 @@ case $OS in
     MACOSX)
         cd $DEPLOYDIR
         /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSIONDATE" OpenSCAD.app/Contents/Info.plist
-        macdeployqt OpenSCAD.app -dmg -no-strip
-        mv OpenSCAD.dmg OpenSCAD-$VERSION.dmg
-        echo "Binary created: OpenSCAD-$VERSION.dmg"
+        macdeployqt OpenSCAD.app -no-strip
+        echo "Binary created: OpenSCAD.app"
         cd $OPENSCADDIR
     ;;
     WIN)

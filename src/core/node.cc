@@ -24,12 +24,18 @@
  *
  */
 
-#include "node.h"
-#include "ModuleInstantiation.h"
-#include "progress.h"
+#include "core/node.h"
+#include "core/AST.h"
+#include "core/ModuleInstantiation.h"
+#include "core/progress.h"
+
+#include <deque>
+#include <memory>
+#include <cstddef>
 #include <functional>
 #include <iostream>
 #include <algorithm>
+#include <string>
 
 size_t AbstractNode::idx_counter;
 

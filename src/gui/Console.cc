@@ -24,17 +24,27 @@
  *
  */
 
+#include "gui/Console.h"
+
+#include <QBrush>
+#include <QColor>
+#include <QContextMenuEvent>
+#include <QFocusEvent>
+#include <QPlainTextEdit>
+#include <QStringLiteral>
+#include <QTextCharFormat>
+#include <QWidget>
+#include <cassert>
 #include <QMenu>
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QTextStream>
 #include <QRegularExpression>
 #include <QString>
-#include "Console.h"
-#include "MainWindow.h"
-#include "printutils.h"
-#include "Preferences.h"
-#include "UIUtils.h"
+#include "gui/MainWindow.h"
+#include "utils/printutils.h"
+#include "gui/Preferences.h"
+#include "gui/UIUtils.h"
 
 Console::Console(QWidget *parent) : QPlainTextEdit(parent)
 {
@@ -100,7 +110,7 @@ void Console::update()
   this->setMaximumBlockCount(0);
   for (const auto& line : this->msgBuffer) {
     QTextCharFormat charFormat;
-    if (line.group != message_group::None && line.group != message_group::Echo) charFormat.setForeground(QBrush(QColor("#000000")));
+    if (line.group != message_group::NONE && line.group != message_group::Echo) charFormat.setForeground(QBrush(QColor("#000000")));
     charFormat.setBackground(QBrush(QColor(getGroupColor(line.group).c_str())));
     if (!line.link.isEmpty()) {
       charFormat.setAnchor(true);
@@ -136,7 +146,7 @@ void Console::actionSaveAs_triggered()
     QTextStream stream(&file);
     stream << text;
     stream.flush();
-    LOG(message_group::None, Location::NONE, "", "Console content saved to '%1$s'.", fileName.toStdString());
+    LOG("Console content saved to '%1$s'.", fileName.toStdString());
   }
 }
 
