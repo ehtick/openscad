@@ -44,8 +44,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <unordered_map>
-#include "printutils.h"
+#include "utils/printutils.h"
 
 template <class Key, class T>
 class Cache
@@ -181,7 +182,7 @@ void Cache<Key, T>::trim(size_t m)
     Node *u = n;
     n = n->p;
 #ifdef DEBUG
-    LOG(message_group::None, Location::NONE, "", "Trimming cache: %1$s (%2$d bytes)", u->keyPtr->substr(0, 40), u->c);
+    LOG("Trimming cache: %1$s (%2$d bytes)", u->keyPtr->substr(0, 40), u->c);
 #endif
     unlink(*u);
   }

@@ -1,3 +1,5 @@
+#!/bin/sh
+
 #
 # This script contains functions for building various libraries
 # used by OpenSCAD.
@@ -136,7 +138,7 @@ build_glib2()
   rm -rf "glib-$version"
   maj_min_version="${version%.*}" #Drop micro
   if [ ! -f "glib-$version.tar.xz" ]; then
-    curl --insecure -LO "http://ftp.gnome.org/pub/gnome/sources/glib/$maj_min_version/glib-$version.tar.xz"
+    curl -LO "https://ftp.gnome.org/pub/gnome/sources/glib/$maj_min_version/glib-$version.tar.xz"
   fi
   tar xJf "glib-$version.tar.xz"
   cd "glib-$version"

@@ -1,4 +1,4 @@
-name: macos-release
+name: macOS Release Build
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       LIBRARIES_CACHE: libraries.tar.gz
     steps:
     - name: Checkout OpenSCAD
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: 'recursive'
     - name: Install Homebrew packages
@@ -25,7 +25,7 @@ jobs:
         brew install automake meson
     - name: Cache Libraries
       id: cache-libraries
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ${{ env.OPENSCAD_LIBRARIES }}
         key: ${{ runner.os }}-libraries-1-${{ hashFiles('./scripts/macosx-build-dependencies.sh', '.github/workflows/macos-release.yml') }}
@@ -40,7 +40,7 @@ jobs:
         echo "DYLD_LIBRARY_PATH: $DYLD_LIBRARY_PATH"
         # Pick up our own Qt
         export PATH=$OPENSCAD_LIBRARIES/bin:$PATH
-        ./scripts/macosx-build-dependencies.sh -d double_conversion eigen gmp mpfr glew gettext libffi freetype ragel harfbuzz libzip libxml2 fontconfig hidapi libuuid lib3mf poppler pixman cairo glib2 boost cgal qt5 opencsg qscintilla sparkle
+        ./scripts/macosx-build-dependencies.sh -d double_conversion eigen gmp mpfr glew gettext libffi freetype ragel harfbuzz libzip libxml2 fontconfig hidapi libuuid lib3mf poppler pixman cairo glib2 boost cgal qt5 opencsg qscintilla sparkle onetbb
     - name: Package Dependencies as an artifact
       run: |
         mkdir -p ${{ runner.temp }}/out
@@ -64,7 +64,7 @@ jobs:
       run: |
         ./scripts/macosx-sanity-check.py ./build/OpenSCAD.app/Contents/MacOS/OpenSCAD
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Build Artifacts
         path: ${{ runner.temp }}/out/

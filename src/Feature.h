@@ -1,12 +1,10 @@
 #pragma once
 
-#include <cstdio>
-#include <iostream>
 #include <string>
 #include <map>
 #include <vector>
 
-#include "exceptions.h"
+#include "utils/exceptions.h"
 
 class Feature
 {
@@ -14,23 +12,16 @@ public:
   using list_t = std::vector<Feature *>;
   using iterator = list_t::iterator;
 
-  static const Feature ExperimentalFastCsg;
-  static const Feature ExperimentalFastCsgTrustCorefinement;
-  static const Feature ExperimentalFastCsgDebug;
-  static const Feature ExperimentalFastCsgExact;
-  static const Feature ExperimentalFastCsgExactCorefinementCallback;
-  static const Feature ExperimentalFastCsgRemesh;
-  static const Feature ExperimentalFastCsgRemeshPredictibly;
   static const Feature ExperimentalRoof;
   static const Feature ExperimentalInputDriverDBus;
   static const Feature ExperimentalLazyUnion;
-  static const Feature ExperimentalVxORenderers;
   static const Feature ExperimentalVxORenderersIndexing;
-  static const Feature ExperimentalVxORenderersDirect;
-  static const Feature ExperimentalVxORenderersPrealloc;
   static const Feature ExperimentalTextMetricsFunctions;
   static const Feature ExperimentalImportFunction;
-  static const Feature ExperimentalSortStl;
+  static const Feature ExperimentalPredictibleOutput;
+#ifdef ENABLE_PYTHON
+  static const Feature ExperimentalPythonEngine;
+#endif
 
   [[nodiscard]] const std::string& get_name() const;
   [[nodiscard]] const std::string& get_description() const;
@@ -55,7 +46,7 @@ private:
   static map_t feature_map;
   static list_t feature_list;
 
-  Feature(const std::string& name, std::string description);
+  Feature(const std::string& name, std::string description, bool hidden = false);
   virtual ~Feature() = default;
 };
 
