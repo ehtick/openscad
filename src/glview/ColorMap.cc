@@ -1,35 +1,22 @@
-#include "ColorMap.h"
-#include "printutils.h"
-#include "PlatformUtils.h"
+#include "glview/ColorMap.h"
+#include "core/ColorUtil.h"
+#include "utils/printutils.h"
+#include "platform/PlatformUtils.h"
 
+#include <algorithm>
+#include <iomanip>
+#include <stdexcept>
+#include <list>
+#include <utility>
+#include <exception>
+#include <memory>
 #include <boost/property_tree/json_parser.hpp>
-#include <boost/filesystem.hpp>
+#include <filesystem>
 #include <cmath>
 
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 
 static const char *DEFAULT_COLOR_SCHEME_NAME = "Cornfield";
-
-// See http://lolengine.net/blog/2013/01/13/fast-rgb-to-hsv
-static void rgbtohsv(float r, float g, float b, float& h, float& s, float& v)
-{
-  float K = 0.f;
-
-  if (g < b) {
-    std::swap(g, b);
-    K = -1.f;
-  }
-
-  if (r < g) {
-    std::swap(r, g);
-    K = -2.f / 6.f - K;
-  }
-
-  float chroma = r - std::min(g, b);
-  h = std::fabs(K + (g - b) / (6.f * chroma + 1e-20f));
-  s = chroma / (r + 1e-20f);
-  v = r;
-}
 
 RenderColorScheme::RenderColorScheme() : _path("")
 {
@@ -76,7 +63,7 @@ RenderColorScheme::RenderColorScheme(const fs::path& path) : _path(path)
       addColor(RenderColor::BACKGROUND_STOP_COLOR, "background");
     }
   } catch (const std::exception& e) {
-    LOG(message_group::None, Location::NONE, "", "Error reading color scheme file: '%1$s': %2$s", path.generic_string().c_str(), e.what());
+    LOG("Error reading color scheme file: '%1$s': %2$s", path.generic_string().c_str(), e.what());
     _error = e.what();
     _name = "";
     _index = 0;
@@ -219,42 +206,6 @@ Color4f ColorMap::getColor(const ColorScheme& cs, const RenderColor rc)
   return {0, 0, 0, 127};
 }
 
-Color4f ColorMap::getColorHSV(const Color4f& col)
-{
-  float h, s, v;
-  rgbtohsv(col[0], col[1], col[2], h, s, v);
-  return {h, s, v, col[3]};
-}
-
-/**
- * Calculate contrast color. Based on the article
- * http://gamedev.stackexchange.com/questions/38536/given-a-rgb-color-x-how-to-find-the-most-contrasting-color-y
- *
- * @param col the input color
- * @return a color with high contrast to the input color
- */
-Color4f ColorMap::getContrastColor(const Color4f& col)
-{
-  Color4f hsv = ColorMap::getColorHSV(col);
-  float Y = 0.2126f * col[0] + 0.7152f * col[1] + 0.0722f * col[2];
-  float S = hsv[1];
-
-  if (S < 0.5) {
-    // low saturation, choose between black / white based on luminance Y
-    float val = Y > 0.5 ? 0.0f : 1.0f;
-    return {val, val, val, 1.0f};
-  } else {
-    float H = 360 * hsv[0];
-    if ((H < 60) || (H > 300)) {
-      return {0.0f, 1.0f, 1.0f, 1.0f}; // red -> cyan
-    } else if (H < 180) {
-      return {1.0f, 0.0f, 1.0f, 1.0f}; // green -> magenta
-    } else {
-      return {1.0f, 1.0f, 0.0f, 1.0f}; // blue -> yellow
-    }
-  }
-}
-
 void ColorMap::enumerateColorSchemesInPath(colorscheme_set_t& result_set, const fs::path& basePath)
 {
   const fs::path color_schemes = basePath / "color-schemes" / "render";
@@ -276,7 +227,7 @@ void ColorMap::enumerateColorSchemesInPath(colorscheme_set_t& result_set, const 
 
       auto *colorScheme = new RenderColorScheme(path);
       if (colorScheme->valid() && (findColorScheme(colorScheme->name()) == nullptr)) {
-        result_set.insert(colorscheme_set_t::value_type(colorScheme->index(), shared_ptr<RenderColorScheme>(colorScheme)));
+        result_set.insert(colorscheme_set_t::value_type(colorScheme->index(), std::shared_ptr<RenderColorScheme>(colorScheme)));
         PRINTDB("Found file '%s' with color scheme '%s' and index %d",
                 colorScheme->path() % colorScheme->name() % colorScheme->index());
       } else {
@@ -293,7 +244,7 @@ ColorMap::colorscheme_set_t ColorMap::enumerateColorSchemes()
 
   auto *defaultColorScheme = new RenderColorScheme();
   result_set.insert(colorscheme_set_t::value_type(defaultColorScheme->index(),
-                                                  shared_ptr<RenderColorScheme>(defaultColorScheme)));
+                                                  std::shared_ptr<RenderColorScheme>(defaultColorScheme)));
   enumerateColorSchemesInPath(result_set, PlatformUtils::resourceBasePath());
   enumerateColorSchemesInPath(result_set, PlatformUtils::userConfigPath());
 

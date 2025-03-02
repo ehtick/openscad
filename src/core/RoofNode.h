@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <exception>
 #include <string>
 #include <utility>
 
-#include "node.h"
+#include "core/ModuleInstantiation.h"
+#include "core/node.h"
 
 class RoofNode : public AbstractPolyNode
 {

@@ -1,10 +1,21 @@
-#include "Camera.h"
-#include "RenderSettings.h"
-#include "printutils.h"
-#include "degree_trig.h"
+#include "glview/Camera.h"
+#include "geometry/linalg.h"
+#include "glview/RenderSettings.h"
+#include "utils/printutils.h"
+#include "utils/degree_trig.h"
 
-static const double DEFAULT_DISTANCE = 140.0;
-static const double DEFAULT_FOV = 22.5;
+#include <cassert>
+#include <memory>
+#include <vector>
+
+namespace {
+
+constexpr double DEFAULT_DISTANCE = 140.0;
+constexpr double DEFAULT_FOV = 22.5;
+constexpr int DEFAULT_WIDTH = 512;
+constexpr int DEFAULT_HEIGHT = 512;
+
+}  // namespace
 
 Camera::Camera() : fov(DEFAULT_FOV)
 {
@@ -13,8 +24,8 @@ Camera::Camera() : fov(DEFAULT_FOV)
   // gimbal cam values
   resetView();
 
-  pixel_width = RenderSettings::inst()->img_width;
-  pixel_height = RenderSettings::inst()->img_height;
+  pixel_width = DEFAULT_WIDTH;
+  pixel_height = DEFAULT_HEIGHT;
   locked = false;
 }
 
@@ -103,7 +114,7 @@ void Camera::updateView(const std::shared_ptr<const FileContext>& context, bool 
       setVpr(x, y, z);
       noauto = true;
     } else {
-      LOG(message_group::Warning, Location::NONE, "", "Unable to convert $vpr=%1$s to a vec3 or vec2 of numbers", vpr->toEchoString());
+      LOG(message_group::Warning, "Unable to convert $vpr=%1$s to a vec3 or vec2 of numbers", vpr->toEchoString());
     }
   }
 
@@ -113,7 +124,7 @@ void Camera::updateView(const std::shared_ptr<const FileContext>& context, bool 
       setVpt(x, y, z);
       noauto = true;
     } else {
-      LOG(message_group::Warning, Location::NONE, "", "Unable to convert $vpt=%1$s to a vec3 or vec2 of numbers", vpt->toEchoString());
+      LOG(message_group::Warning, "Unable to convert $vpt=%1$s to a vec3 or vec2 of numbers", vpt->toEchoString());
     }
   }
 
@@ -123,7 +134,7 @@ void Camera::updateView(const std::shared_ptr<const FileContext>& context, bool 
       setVpd(vpd->toDouble());
       noauto = true;
     } else {
-      LOG(message_group::Warning, Location::NONE, "", "Unable to convert $vpd=%1$s to a number", vpd->toEchoString());
+      LOG(message_group::Warning, "Unable to convert $vpd=%1$s to a number", vpd->toEchoString());
     }
   }
 
@@ -133,12 +144,12 @@ void Camera::updateView(const std::shared_ptr<const FileContext>& context, bool 
       setVpf(vpf->toDouble());
       noauto = true;
     } else {
-      LOG(message_group::Warning, Location::NONE, "", "Unable to convert $vpf=%1$s to a number", vpf->toEchoString());
+      LOG(message_group::Warning, "Unable to convert $vpf=%1$s to a number", vpf->toEchoString());
     }
   }
 
   if (enableWarning && (viewall || autocenter) && noauto) {
-    LOG(message_group::UI_Warning, Location::NONE, "", "Viewall and autocenter disabled in favor of $vp*");
+    LOG(message_group::UI_Warning, "Viewall and autocenter disabled in favor of $vp*");
     viewall = false;
     autocenter = false;
   }

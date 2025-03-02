@@ -1,9 +1,17 @@
 #pragma once
 
-#include "qtgettext.h"
+#include <QAction>
+#include <QList>
+#include <QPushButton>
+#include <QResizeEvent>
+#include <QTimer>
+#include <QWidget>
+#include <string>
+
+#include "gui/qtgettext.h"
 #include "ui_Animate.h"
 #include <QIcon>
-#include "input/InputDriverEvent.h"
+#include "gui/input/InputDriverEvent.h"
 
 class MainWindow;
 
@@ -23,13 +31,12 @@ public:
   bool dumpPictures();
   int nextFrame();
 
-  QTimer *animate_timer;
+  QTimer *animateTimer;
 
   void setMainWindow(MainWindow *mainWindow);
 
   const QList<QAction *>& actions();
-  double getAnim_tval();
-  QSize minimumSizeHint() const override;
+  double getAnimTval();
 
 public slots:
   void animateUpdate();
@@ -40,8 +47,6 @@ public slots:
 
   void on_pushButton_MoveToBeginning_clicked();
   void on_pushButton_StepBack_clicked();
-  void on_pushButton_Resume_clicked();
-  void on_pushButton_Pause_clicked();
   void on_pushButton_StepForward_clicked();
   void on_pushButton_MoveToEnd_clicked();
 
@@ -53,22 +58,25 @@ private:
   MainWindow *mainWindow;
 
   void updatePauseButtonIcon();
-  void initVCR();
+  void connectAction(QAction *, QPushButton *);
 
-  double anim_tval;
-  bool anim_dumping;
-  int anim_dump_start_step;
-  int anim_step;
-  int anim_numsteps;
+  double animTVal;
+  bool animDumping;
+  int animDumpStartStep;
+  int animStep;
+  int animNumSteps;
 
-  bool isLightTheme();
-
-  bool fps_ok;
-  bool t_ok;
+  bool fpsOK;
+  bool tOK;
   bool steps_ok;
 
-  QList<QAction *> action_list;
-  void createActionAndPrepareButton(const QIcon& icon, const QString& description, const std::string& actionName, QPushButton *button);
+  int initMinWidth;
+
+  QIcon iconRun;
+  QIcon iconPause;
+  QIcon iconDisabled;
+  QList<QAction *> actionList;
+  QColor errorBlendColor{"red"};
 
 signals:
 

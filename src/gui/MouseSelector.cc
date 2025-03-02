@@ -1,7 +1,10 @@
-#include "system-gl.h"
-#include "MouseSelector.h"
+#include "gui/MouseSelector.h"
 
-#include <QOpenGLFramebufferObject>
+#include "glview/system-gl.h"
+#include "glview/fbo.h"
+
+#include <cstdint>
+#include <string>
 #include <memory>
 /**
  * The selection is making use of a special shader, that renders each object in a color
@@ -16,21 +19,8 @@
  * might do "fancy" optimization.
  */
 
-#define OPENGL_TEST(place) \
-        do { \
-          auto err = glGetError(); \
-          if (err != GL_NO_ERROR) { \
-            fprintf(stderr, "OpenGL error " __FILE__ ":%i:" place ":\n %s\n\n", __LINE__, gluErrorString(err)); \
-          } \
-        } while (false)
-
 MouseSelector::MouseSelector(GLView *view) {
   this->view = view;
-  if (view && !view->has_shaders) {
-    return;
-  }
-  this->init_shader();
-
   if (view) this->reset(view);
 }
 
@@ -39,114 +29,61 @@ MouseSelector::MouseSelector(GLView *view) {
  */
 void MouseSelector::reset(GLView *view) {
   this->view = view;
-  this->setup_framebuffer(view);
+  this->setupFramebuffer(view->cam.pixel_width, view->cam.pixel_height);
 }
 
 /**
- * Initialize the used shaders and setup the shaderinfo_t struct
+ * Initialize the used shaders and setup the ShaderInfo struct
  */
-void MouseSelector::init_shader() {
-  /*
-     Attributes:
-   * frag_idcolor - (uniform) 24 bit of the selected object's id encoded into R/G/B components as float values
-   */
+void MouseSelector::initShader() {
+  // Attributes:
+  // frag_idcolor - (uniform) 24 bit of the selected object's id encoded into R/G/B components as float values 
+  const auto selectshader = ShaderUtils::compileShaderProgram(
+    ShaderUtils::loadShaderSource("MouseSelector.vert"),
+    ShaderUtils::loadShaderSource("MouseSelector.frag"));
 
-  std::string vs_str = Renderer::loadShaderSource("MouseSelector.vert");
-  std::string fs_str = Renderer::loadShaderSource("MouseSelector.frag");
-  const char *vs_source = vs_str.c_str();
-  const char *fs_source = fs_str.c_str();
-
-  int shaderstatus;
-
-  // Compile the shaders
-  auto vs = glCreateShader(GL_VERTEX_SHADER);
-  OPENGL_TEST("Vertex Shader");
-  glShaderSource(vs, 1, (const GLchar **)&vs_source, nullptr);
-  glCompileShader(vs);
-  glGetShaderiv(vs, GL_COMPILE_STATUS, &shaderstatus);
-  if (shaderstatus != GL_TRUE) {
-    int loglen;
-    char logbuffer[1000];
-    glGetShaderInfoLog(vs, sizeof(logbuffer), &loglen, logbuffer);
-    fprintf(stderr, __FILE__ ": OpenGL vertex shader Error:\n%.*s\n\n", loglen, logbuffer);
+  const GLint frag_idcolor = glGetUniformLocation(selectshader.shader_program, "frag_idcolor");
+  if (frag_idcolor < 0) {
+    // TODO: Surface error better
+    fprintf(stderr, __FILE__ ": OpenGL symbol retrieval went wrong, id is %i\n\n", frag_idcolor);
   }
-
-  auto fs = glCreateShader(GL_FRAGMENT_SHADER);
-  OPENGL_TEST("Fragment Shader");
-  glShaderSource(fs, 1, (const GLchar **)&fs_source, nullptr);
-  glCompileShader(fs);
-  glGetShaderiv(fs, GL_COMPILE_STATUS, &shaderstatus);
-  if (shaderstatus != GL_TRUE) {
-    int loglen;
-    char logbuffer[1000];
-    glGetShaderInfoLog(fs, sizeof(logbuffer), &loglen, logbuffer);
-    fprintf(stderr, __FILE__ ": OpenGL fragment shader Error:\n%.*s\n\n", loglen, logbuffer);
-  }
-
-  // Link
-  auto selecthader_prog = glCreateProgram();
-  glAttachShader(selecthader_prog, vs);
-  glAttachShader(selecthader_prog, fs);
-  glLinkProgram(selecthader_prog);
-  OPENGL_TEST("Linking Shader");
-
-  GLint status;
-  glGetProgramiv(selecthader_prog, GL_LINK_STATUS, &status);
-  if (status == GL_FALSE) {
-    int loglen;
-    char logbuffer[1000];
-    glGetProgramInfoLog(selecthader_prog, sizeof(logbuffer), &loglen, logbuffer);
-    fprintf(stderr, __FILE__ ": OpenGL Program Linker Error:\n%.*s\n\n", loglen, logbuffer);
-  } else {
-    int loglen;
-    char logbuffer[1000];
-    glGetProgramInfoLog(selecthader_prog, sizeof(logbuffer), &loglen, logbuffer);
-    if (loglen > 0) {
-      fprintf(stderr, __FILE__ ": OpenGL Program Link OK:\n%.*s\n\n", loglen, logbuffer);
-    }
-    glValidateProgram(selecthader_prog);
-    glGetProgramInfoLog(selecthader_prog, sizeof(logbuffer), &loglen, logbuffer);
-    if (loglen > 0) {
-      fprintf(stderr, __FILE__ ": OpenGL Program Validation results:\n%.*s\n\n", loglen, logbuffer);
-    }
-  }
-
-  this->shaderinfo.progid = selecthader_prog;
-  this->shaderinfo.type = Renderer::SELECT_RENDERING;
-  GLint identifier = glGetUniformLocation(selecthader_prog, "frag_idcolor");
-  if (identifier < 0) {
-    fprintf(stderr, __FILE__ ": OpenGL symbol retrieval went wrong, id is %i\n\n", identifier);
-    this->shaderinfo.data.select_rendering.identifier = 0;
-  } else {
-    this->shaderinfo.data.select_rendering.identifier = identifier;
-  }
+  this->shaderinfo = {
+    .resource = selectshader,
+    .type = ShaderUtils::ShaderType::SELECT_RENDERING,
+    .uniforms = {
+      {"frag_idcolor", glGetUniformLocation(selectshader.shader_program, "frag_idcolor")},
+    },
+  };
 }
 
 /**
  * Resize or create the framebuffer
  */
-void MouseSelector::setup_framebuffer(const GLView *view) {
+void MouseSelector::setupFramebuffer(int width, int height) {
   if (!this->framebuffer ||
-      static_cast<unsigned int>(this->framebuffer->width()) != view->cam.pixel_width ||
-      static_cast<unsigned int>(this->framebuffer->height()) != view->cam.pixel_height) {
-    this->framebuffer = std::make_unique<QOpenGLFramebufferObject>(
-      view->cam.pixel_width,
-      view->cam.pixel_width,
-      QOpenGLFramebufferObject::Depth);
-    this->framebuffer->release();
+      this->framebuffer->width() != width ||
+      this->framebuffer->height() != height) {
+    this->framebuffer = createFBO(width, height);
+    this->initShader();
   }
 }
 
 /**
  * Setup the shaders, Projection and Model matrix and call the given renderer.
- * The renderer has to make sure, that the colors are defined accordingly, or
- * the selection won't work.
+ * The renderer has to support rendering with ID colors (using the shader we provide),
+ * otherwise the selection won't work.
  *
- * returns 0 if no object was found
+ * returns index of picked node (AbstractNode::idx) or -1 if no object was found.
  */
 int MouseSelector::select(const Renderer *renderer, int x, int y) {
-  // x/y is originated topleft, so turn y around
-  y = this->view->cam.pixel_height - y;
+  // This function should render a frame, as usual, with the following changes:
+  // * Render to as custom framebuffer
+  // * The shader should be the selector shader
+  // * Since we use ID color, no color setup is needed
+  // * No lighting
+  // * No decorations, like axes
+
+  // TODO: Ideally, we should make the above configurable and reduce duplicate render code in this function.
 
   if (x > static_cast<int>(this->view->cam.pixel_width) || x < 0 ||
       y > static_cast<int>(this->view->cam.pixel_height) || y < 0) {
@@ -158,8 +95,7 @@ int MouseSelector::select(const Renderer *renderer, int x, int y) {
   // of the currently selected frame.
   // For now, i will use a texture the same size as the normal viewport
   // and select the identifier at the mouse coordinates
-  this->framebuffer->bind();
-  OPENGL_TEST("switch FBO");
+  GL_CHECKD(this->framebuffer->bind());
 
   glClearColor(0, 0, 0, 1.0);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -177,8 +113,7 @@ int MouseSelector::select(const Renderer *renderer, int x, int y) {
   glEnable(GL_DEPTH_TEST);
 
   // call the renderer with the selector shader
-  renderer->draw(true, false, &this->shaderinfo);
-  OPENGL_TEST("renderer->draw");
+  GL_CHECKD(renderer->draw(false, &this->shaderinfo));
 
   // Not strictly necessary, but a nop if not required.
   glFlush();
@@ -186,14 +121,14 @@ int MouseSelector::select(const Renderer *renderer, int x, int y) {
 
   // Grab the color from the framebuffer and convert it back to an identifier
   GLubyte color[3] = { 0 };
-  glReadPixels(x, y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, color);
-  OPENGL_TEST("glReadPixels");
+  // Qt position is originated top-left, so flip y to get GL coordinates.
+  GL_CHECKD(glReadPixels(x, this->view->cam.pixel_height - y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, color));
   glDisable(GL_DEPTH_TEST);
 
-  int index = (uint32_t)color[0] | ((uint32_t)color[1] << 8) | ((uint32_t)color[2] << 16);
+  const int index = (uint32_t)color[0] | ((uint32_t)color[1] << 8) | ((uint32_t)color[2] << 16);
 
   // Switch the active framebuffer back to the default
-  this->framebuffer->release();
+  this->framebuffer->unbind();
 
   return index;
 }
