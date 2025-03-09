@@ -1,9 +1,16 @@
-#include "parsersettings.h"
-#include <boost/filesystem.hpp>
-#include <boost/algorithm/string.hpp>
-#include "PlatformUtils.h"
+#include "core/parsersettings.h"
 
-namespace fs = boost::filesystem;
+#include <algorithm>
+#include <iterator>
+#include <cassert>
+#include <string>
+#include <vector>
+
+#include <filesystem>
+#include <boost/algorithm/string.hpp>
+#include "platform/PlatformUtils.h"
+
+namespace fs = std::filesystem;
 
 std::vector<std::string> librarypath;
 
@@ -38,19 +45,19 @@ fs::path search_libs(const fs::path& localpath)
 static bool check_valid(const fs::path& p, const std::vector<std::string> *openfilenames)
 {
   if (p.empty()) {
-    // LOG(message_group::Warning,Location::NONE,"","File path is blank: %1$s",p);
+    // LOG(message_group::Warning,,"File path is blank: %1$s",p);
     return false;
   }
   if (!p.has_parent_path()) {
-    // LOG(message_group::Warning,Location::NONE,"","No parent path: %1$s",p);
+    // LOG(message_group::Warning,,"No parent path: %1$s",p);
     return false;
   }
   if (!fs::exists(p)) {
-    // LOG(message_group::Warning,Location::NONE,"","File not found: %1$s",p);
+    // LOG(message_group::Warning,,"File not found: %1$s",p);
     return false;
   }
   if (fs::is_directory(p)) {
-    // LOG(message_group::Warning,Location::NONE,"","%1$s invalid - points to a directory",p);
+    // LOG(message_group::Warning,,"%1$s invalid - points to a directory",p);
     return false;
   }
   const std::string& fullname = p.generic_string();
@@ -58,7 +65,7 @@ static bool check_valid(const fs::path& p, const std::vector<std::string> *openf
   if (openfilenames) {
     for (const auto& s : *openfilenames) {
       if (s == fullname) {
-        // LOG(message_group::Warning,Location::NONE,"","circular include file %1$s",fullname);
+        // LOG(message_group::Warning,,"circular include file %1$s",fullname);
         return false;
       }
     }
@@ -80,10 +87,18 @@ inline fs::path find_valid_path_(const fs::path& sourcepath,
                           const std::vector<std::string> *openfilenames)
 {
   if (localpath.is_absolute()) {
-    if (check_valid(localpath, openfilenames)) return fs::canonical(localpath);
+    if (check_valid(localpath, openfilenames)) {
+#ifndef __EMSCRIPTEN__
+      return fs::canonical(localpath);
+#else
+      return localpath;
+#endif
+    }
   } else {
     fs::path fpath = sourcepath / localpath;
+#ifndef __EMSCRIPTEN__
     if (fs::exists(fpath)) fpath = fs::canonical(fpath);
+#endif
     if (check_valid(fpath, openfilenames)) return fpath;
     fpath = search_libs(localpath);
     if (!fpath.empty() && check_valid(fpath, openfilenames)) return fpath;
@@ -141,11 +156,18 @@ void parser_init()
     std::string sep = PlatformUtils::pathSeparatorChar();
     using string_split_iterator = boost::split_iterator<std::string::iterator>;
     for (string_split_iterator it = boost::make_split_iterator(paths, boost::first_finder(sep, boost::is_iequal())); it != string_split_iterator(); ++it) {
-      add_librarydir(fs::absolute(fs::path(boost::copy_range<std::string>(*it))).generic_string());
+      auto str{boost::copy_range<std::string>(*it)};
+      fs::path abspath = str.empty() ? fs::current_path() : fs::absolute(fs::path(str));
+      add_librarydir(abspath.generic_string());
     }
   }
 
   add_librarydir(PlatformUtils::userLibraryPath());
 
-  add_librarydir(fs::absolute(PlatformUtils::resourcePath("libraries")).string());
+  fs::path libpath = PlatformUtils::resourcePath("libraries");
+  // std::filesystem::absolute() will throw if passed empty path
+  if (libpath.empty()) {
+    libpath = fs::current_path();
+  }
+  add_librarydir(fs::absolute(libpath).string());
 }

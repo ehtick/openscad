@@ -1,5 +1,8 @@
-#include "ParameterSpinBox.h"
-#include "IgnoreWheelWhenNotFocused.h"
+#include "gui/parameter/ParameterSpinBox.h"
+#include <QWidget>
+#include <algorithm>
+#include <limits>
+#include "gui/IgnoreWheelWhenNotFocused.h"
 
 ParameterSpinBox::ParameterSpinBox(QWidget *parent, NumberParameter *parameter, DescriptionStyle descriptionStyle) :
   ParameterVirtualWidget(parent, parameter),
@@ -42,8 +45,8 @@ ParameterSpinBox::ParameterSpinBox(QWidget *parent, NumberParameter *parameter, 
   doubleSpinBox->setRange(minimum, maximum);
   doubleSpinBox->setSingleStep(step);
 
-  connect(doubleSpinBox, SIGNAL(valueChanged(double)), this, SLOT(onChanged(double)));
-  connect(doubleSpinBox, SIGNAL(editingFinished()), this, SLOT(onEditingFinished()));
+  connect(doubleSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ParameterSpinBox::onChanged);
+  connect(doubleSpinBox, &QDoubleSpinBox::editingFinished, this, &ParameterSpinBox::onEditingFinished);
   ParameterSpinBox::setValue();
 }
 

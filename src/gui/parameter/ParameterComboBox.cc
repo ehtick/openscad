@@ -1,5 +1,7 @@
-#include "ParameterComboBox.h"
-#include "IgnoreWheelWhenNotFocused.h"
+#include "gui/parameter/ParameterComboBox.h"
+#include <QString>
+#include <QWidget>
+#include "gui/IgnoreWheelWhenNotFocused.h"
 
 ParameterComboBox::ParameterComboBox(QWidget *parent, EnumParameter *parameter, DescriptionStyle descriptionStyle) :
   ParameterVirtualWidget(parent, parameter),
@@ -15,7 +17,7 @@ ParameterComboBox::ParameterComboBox(QWidget *parent, EnumParameter *parameter, 
     comboBox->addItem(QString::fromStdString(item.key));
   }
 
-  connect(comboBox, SIGNAL(activated(int)), this, SLOT(onChanged(int)));
+  connect(comboBox, QOverload<int>::of(&QComboBox::activated), this, &ParameterComboBox::onChanged);
   ParameterComboBox::setValue();
 }
 

@@ -23,15 +23,14 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
+#include "utils/calc.h"
 
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _USE_MATH_DEFINES
 #include <cmath>
+
 #include <cassert>
 #include <algorithm>
-#include "calc.h"
-#include "Grid.h"
-#include "degree_trig.h"
+#include "geometry/Grid.h"
+#include "utils/degree_trig.h"
 
 // Linear interpolate.  Can replace with std::lerp in C++20
 double Calc::lerp(double a, double b, double t) {
@@ -130,7 +129,7 @@ int Calc::get_conical_helix_slices(double r_sqr, double height, double twist, do
      B = E - t            B = E - t
    */
   double rads = twist * M_DEG2RAD;
-  double angle_end;
+  double angle_end=0;
   if (scale > 1) {
     angle_end = rads * scale / (scale - 1);
   } else if (scale < 1) {

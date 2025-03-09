@@ -24,47 +24,72 @@
  *
  */
 
+#include "gui/UIUtils.h"
+
+#include <filesystem>
+#include <QString>
+#include <QStringList>
+#include <QWidget>
+#include <exception>
 #include <QDir>
 #include <QFileInfo>
 #include <QUrl>
 #include <QFileDialog>
 #include <QDesktopServices>
+#include <QRegularExpression>
 
 #include "version.h"
-#include "UIUtils.h"
-#include "PlatformUtils.h"
-#include "QSettingsCached.h"
+#include "platform/PlatformUtils.h"
+#include "gui/QSettingsCached.h"
 
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
-QFileInfo UIUtils::openFile(QWidget *parent)
+#include <string>
+
+namespace {
+
+QString fileOpenFilter(const QString& pattern, QStringList extensions)
+{
+    if (extensions.isEmpty()) {
+        extensions << "scad" << "csg";
+#ifdef ENABLE_PYTHON
+        extensions << "py";
+#endif
+    }
+    extensions.replaceInStrings(QRegularExpression("^"), "*.");
+    return pattern.arg(extensions.join(" "));
+}
+
+}
+
+QFileInfo UIUtils::openFile(QWidget *parent, QStringList extensions)
 {
   QSettingsCached settings;
-  QString last_dirname = settings.value("lastOpenDirName").toString();
-  QString new_filename = QFileDialog::getOpenFileName(parent, "Open File",
-                                                      last_dirname, "OpenSCAD Designs (*.scad *.csg)");
+  const auto last_dirname = settings.value("lastOpenDirName").toString();
+  const auto filter = fileOpenFilter("OpenSCAD Designs (%1)", std::move(extensions));
+  const auto filename = QFileDialog::getOpenFileName(parent, "Open File",
+                                                     last_dirname, filter);
 
-  if (new_filename.isEmpty()) {
+  if (filename.isEmpty()) {
     return {};
   }
 
-  QFileInfo fileInfo(new_filename);
-  QDir last_dir = fileInfo.dir();
-  last_dirname = last_dir.path();
-  settings.setValue("lastOpenDirName", last_dirname);
+  QFileInfo fileInfo(filename);
+  settings.setValue("lastOpenDirName", fileInfo.dir().path());
   return fileInfo;
 }
 
-QFileInfoList UIUtils::openFiles(QWidget *parent)
+QFileInfoList UIUtils::openFiles(QWidget *parent, QStringList extensions)
 {
   QSettingsCached settings;
-  QString last_dirname = settings.value("lastOpenDirName").toString();
-  QStringList new_filenames = QFileDialog::getOpenFileNames(parent, "Open File",
-                                                            last_dirname, "OpenSCAD Designs (*.scad *.csg)");
+  const auto last_dirname = settings.value("lastOpenDirName").toString();
+  const auto filter = fileOpenFilter("OpenSCAD Designs (%1)", std::move(extensions));
+  const auto filenames = QFileDialog::getOpenFileNames(parent, "Open File",
+                                                       last_dirname, filter);
 
   QFileInfoList fileInfoList;
-  for (const QString& filename: new_filenames) {
+  for (const QString& filename: filenames) {
     if (filename.isEmpty()) {
       continue;
     }
@@ -72,9 +97,8 @@ QFileInfoList UIUtils::openFiles(QWidget *parent)
   }
 
   if (!fileInfoList.isEmpty()) {
-    QDir last_dir = fileInfoList[fileInfoList.size() - 1].dir(); // last_dir is set to directory of last chosen valid file
-    last_dirname = last_dir.path();
-    settings.setValue("lastOpenDirName", last_dirname);
+    // last_dir is set to directory of last chosen valid file
+    settings.setValue("lastOpenDirName", fileInfoList.back().dir().path());
   }
 
   return fileInfoList;
@@ -113,7 +137,7 @@ static ptree *examplesTree()
       examples_tree = new ptree;
       read_json(path, *examples_tree);
     } catch (const std::exception& e) {
-      LOG(message_group::None, Location::NONE, "", "Error reading examples.json: %1$s", e.what());
+      LOG("Error reading examples.json: %1$s", e.what());
       delete examples_tree;
       examples_tree = nullptr;
     }
@@ -227,4 +251,18 @@ void UIUtils::openOfflineCheatSheet()
     QString docPath = QString::fromStdString(fullPath.string());
     QDesktopServices::openUrl(QUrl(docPath));
   }
+}
+
+QString UIUtils::getBackgroundColorStyleSheet(const QColor &color)
+{
+  return QString("background-color:%1;").arg(color.toRgb().name());
+}
+
+QString UIUtils::blendForBackgroundColorStyleSheet(const QColor& input, const QColor& blend, float transparency)
+{
+  const auto result = QColor(
+    255.0 * (transparency * blend.redF() + (1 - transparency) * input.redF()),
+    255.0 * (transparency * blend.greenF() + (1 - transparency) * input.greenF()),
+    255.0 * (transparency * blend.blueF() + (1 - transparency) * input.blueF()));
+  return getBackgroundColorStyleSheet(result);
 }

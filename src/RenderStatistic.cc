@@ -23,19 +23,39 @@
  *
  */
 
-#include <json.hpp>
-
-#include "printutils.h"
-#include "GeometryCache.h"
-#include "CGALCache.h"
-#include "PolySet.h"
-#include "Polygon2d.h"
-#ifdef ENABLE_CGAL
-#include "CGAL_Nef_polyhedron.h"
-#include "CGALHybridPolyhedron.h"
-#endif // ENABLE_CGAL
 
 #include "RenderStatistic.h"
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <boost/range/algorithm/find.hpp>
+
+#include "json/json.hpp"
+
+#include "geometry/Geometry.h"
+#include "geometry/GeometryCache.h"
+#include "geometry/linalg.h"
+#include "geometry/Polygon2d.h"
+#include "geometry/PolySet.h"
+#include "glview/Camera.h"
+#include "utils/printutils.h"
+#ifdef ENABLE_CGAL
+#include "geometry/cgal/CGAL_Nef_polyhedron.h"
+#include "geometry/cgal/CGALCache.h"
+#endif // ENABLE_CGAL
+#ifdef ENABLE_MANIFOLD
+#include "geometry/manifold/ManifoldGeometry.h"
+#include "geometry/manifold/manifoldutils.h"
+#endif // ENABLE_MANIFOLD
+
 
 class GeometryList;
 
@@ -67,8 +87,10 @@ struct LogVisitor : public StatisticVisitor
   void visit(const Polygon2d& node) override;
 #ifdef ENABLE_CGAL
   void visit(const CGAL_Nef_polyhedron& node) override;
-  void visit(const CGALHybridPolyhedron& node) override;
 #endif // ENABLE_CGAL
+#ifdef ENABLE_MANIFOLD
+  void visit(const ManifoldGeometry& node) override;
+#endif // ENABLE_MANIFOLD
   void printCamera(const Camera& camera) override;
   void printCacheStatistic() override;
   void printRenderingTime(std::chrono::milliseconds) override;
@@ -89,8 +111,10 @@ struct StreamVisitor : public StatisticVisitor
   void visit(const Polygon2d& node) override;
 #ifdef ENABLE_CGAL
   void visit(const CGAL_Nef_polyhedron& node) override;
-  void visit(const CGALHybridPolyhedron& node) override;
 #endif // ENABLE_CGAL
+#ifdef ENABLE_MANIFOLD
+  void visit(const ManifoldGeometry& node) override;
+#endif // ENABLE_MANIFOLD
   void printCamera(const Camera& camera) override;
   void printCacheStatistic() override;
   void printRenderingTime(std::chrono::milliseconds) override;
@@ -101,8 +125,7 @@ private:
   std::ostream& stream;
 };
 
-template <typename G>
-static nlohmann::json getBoundingBox2(G geometry)
+static nlohmann::json getBoundingBox2d(const Geometry& geometry)
 {
   const auto& bb = geometry.getBoundingBox();
   const std::array<double, 2> min = { bb.min().x(), bb.min().y() };
@@ -115,8 +138,7 @@ static nlohmann::json getBoundingBox2(G geometry)
   return bbJson;
 }
 
-template <typename G>
-static nlohmann::json getBoundingBox3(G geometry)
+static nlohmann::json getBoundingBox3d(const Geometry& geometry)
 {
   const auto& bb = geometry.getBoundingBox();
   const std::array<double, 3> min = { bb.min().x(), bb.min().y(), bb.min().z() };
@@ -169,7 +191,7 @@ void RenderStatistic::printRenderingTime()
   visitor.printRenderingTime(ms());
 }
 
-void RenderStatistic::printAll(const shared_ptr<const Geometry>& geom, const Camera& camera, const std::vector<std::string>& options, const std::string& filename)
+void RenderStatistic::printAll(const std::shared_ptr<const Geometry>& geom, const Camera& camera, const std::vector<std::string>& options, const std::string& filename)
 {
   //bool is_log = false;
   std::unique_ptr<StatisticVisitor> visitor;
@@ -193,43 +215,48 @@ void RenderStatistic::printAll(const shared_ptr<const Geometry>& geom, const Cam
 
 void LogVisitor::visit(const GeometryList& geomlist)
 {
-  LOG(message_group::None, Location::NONE, "", "Top level object is a list of objects:");
-  LOG(message_group::None, Location::NONE, "", "   Objects:    %1$d",
+  LOG("Top level object is a list of objects:");
+  LOG("   Objects:    %1$d",
       geomlist.getChildren().size());
 }
 
 void LogVisitor::visit(const Polygon2d& poly)
 {
-  LOG(message_group::None, Location::NONE, "", "Top level object is a 2D object:");
-  LOG(message_group::None, Location::NONE, "", "   Contours:   %1$6d", poly.outlines().size());
+  LOG("Top level object is a 2D object:");
+  LOG("   Contours:   %1$6d", poly.outlines().size());
   if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
     const auto& bb = poly.getBoundingBox();
-    LOG(message_group::None, Location::NONE, "", "Bounding box:");
-    LOG(message_group::None, Location::NONE, "", "   Min:  %1$.2f, %2$.2f", bb.min().x(), bb.min().y());
-    LOG(message_group::None, Location::NONE, "", "   Max:  %1$.2f, %2$.2f", bb.max().x(), bb.max().y());
-    LOG(message_group::None, Location::NONE, "", "   Size: %1$.2f, %2$.2f", bb.max().x() - bb.min().x(), bb.max().y() - bb.min().y());
+    LOG("Bounding box:");
+    LOG("   Min:  %1$.2f, %2$.2f", bb.min().x(), bb.min().y());
+    LOG("   Max:  %1$.2f, %2$.2f", bb.max().x(), bb.max().y());
+    LOG("   Size: %1$.2f, %2$.2f", bb.max().x() - bb.min().x(), bb.max().y() - bb.min().y());
   }
   if (is_enabled(RenderStatistic::AREA)) {
-    LOG(message_group::None, Location::NONE, "", "Measurements:");
-    LOG(message_group::None, Location::NONE, "", "   Area: %1$.2f", poly.area());
+    LOG("Measurements:");
+    LOG("   Area: %1$.2f", poly.area());
   }
 }
 
 void LogVisitor::printBoundingBox3(const BoundingBox& bb)
 {
   if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
-    LOG(message_group::None, Location::NONE, "", "Bounding box:");
-    LOG(message_group::None, Location::NONE, "", "   Min:  %1$.2f, %2$.2f, %3$.2f", bb.min().x(), bb.min().y(), bb.min().z());
-    LOG(message_group::None, Location::NONE, "", "   Max:  %1$.2f, %2$.2f, %3$.2f", bb.max().x(), bb.max().y(), bb.max().z());
-    LOG(message_group::None, Location::NONE, "", "   Size: %1$.2f, %2$.2f, %3$.2f", bb.max().x() - bb.min().x(), bb.max().y() - bb.min().y(), bb.max().z() - bb.min().z());
+    LOG("Bounding box:");
+    LOG("   Min:  %1$.2f, %2$.2f, %3$.2f", bb.min().x(), bb.min().y(), bb.min().z());
+    LOG("   Max:  %1$.2f, %2$.2f, %3$.2f", bb.max().x(), bb.max().y(), bb.max().z());
+    LOG("   Size: %1$.2f, %2$.2f, %3$.2f", bb.max().x() - bb.min().x(), bb.max().y() - bb.min().y(), bb.max().z() - bb.min().z());
   }
 }
 
 void LogVisitor::visit(const PolySet& ps)
 {
   assert(ps.getDimension() == 3);
-  LOG(message_group::None, Location::NONE, "", "Top level object is a 3D object:");
-  LOG(message_group::None, Location::NONE, "", "   Facets:     %1$6d", ps.numFacets());
+  LOG("Top level object is a 3D object (PolySet):");
+  LOG("   Convex:       %1$s", (ps.isConvex() ? "yes" : "no"));
+  if (ps.isTriangular()) {
+    LOG("   Triangles: %1$6d", ps.numFacets());
+  } else {
+    LOG("   Facets:    %1$6d", ps.numFacets());
+  }
   printBoundingBox3(ps.getBoundingBox());
 }
 
@@ -237,43 +264,45 @@ void LogVisitor::visit(const PolySet& ps)
 void LogVisitor::visit(const CGAL_Nef_polyhedron& nef)
 {
   if (nef.getDimension() == 3) {
-    bool simple = nef.p3->is_simple();
-    LOG(message_group::None, Location::NONE, "", "Top level object is a 3D object:");
-    LOG(message_group::None, Location::NONE, "", "   Simple:     %6s", (simple ? "yes" : "no"));
-    LOG(message_group::None, Location::NONE, "", "   Vertices:   %1$6d", nef.p3->number_of_vertices());
-    LOG(message_group::None, Location::NONE, "", "   Halfedges:  %1$6d", nef.p3->number_of_halfedges());
-    LOG(message_group::None, Location::NONE, "", "   Edges:      %1$6d", nef.p3->number_of_edges());
-    LOG(message_group::None, Location::NONE, "", "   Halffacets: %1$6d", nef.p3->number_of_halffacets());
-    LOG(message_group::None, Location::NONE, "", "   Facets:     %1$6d", nef.p3->number_of_facets());
-    LOG(message_group::None, Location::NONE, "", "   Volumes:    %1$6d", nef.p3->number_of_volumes());
+    const bool simple = nef.p3->is_simple();
+    LOG("Top level object is a 3D object (Nef polyhedron):");
+    LOG("   Simple:     %1$s", (simple ? "yes" : "no"));
+    LOG("   Vertices:   %1$6d", nef.p3->number_of_vertices());
+    LOG("   Halfedges:  %1$6d", nef.p3->number_of_halfedges());
+    LOG("   Edges:      %1$6d", nef.p3->number_of_edges());
+    LOG("   Halffacets: %1$6d", nef.p3->number_of_halffacets());
+    LOG("   Facets:     %1$6d", nef.p3->number_of_facets());
+    LOG("   Volumes:    %1$6d", nef.p3->number_of_volumes());
     if (!simple) {
-      LOG(message_group::UI_Warning, Location::NONE, "", "Object may not be a valid 2-manifold and may need repair!");
+      LOG(message_group::UI_Warning, "Object may not be a valid 2-manifold and may need repair!");
     }
     printBoundingBox3(nef.getBoundingBox());
   }
 }
-void LogVisitor::visit(const CGALHybridPolyhedron& poly)
-{
-  bool simple = poly.isManifold();
-  LOG(message_group::None, Location::NONE, "", "   Top level object is a 3D object (fast-csg):");
-  LOG(message_group::None, Location::NONE, "", "   Simple:     %6s", (simple ? "yes" : "no"));
-  LOG(message_group::None, Location::NONE, "", "   Vertices:   %1$6d", poly.numVertices());
-  LOG(message_group::None, Location::NONE, "", "   Facets:     %1$6d", poly.numFacets());
-  if (!simple) {
-    LOG(message_group::UI_Warning, Location::NONE, "", "Object may not be a valid 2-manifold and may need repair!");
-  }
-  printBoundingBox3(poly.getBoundingBox());
-}
 #endif // ENABLE_CGAL
+
+#ifdef ENABLE_MANIFOLD
+void LogVisitor::visit(const ManifoldGeometry& mani_geom)
+{
+  LOG("   Top level object is a 3D object (manifold):");
+  auto &mani = mani_geom.getManifold();
+
+  LOG("   Status:     %1$s", ManifoldUtils::statusToString(mani.Status()));
+  LOG("   Genus:      %1$d", mani.Genus());
+  LOG("   Vertices:   %1$6d", mani.NumVert());
+  LOG("   Facets:     %1$6d", mani.NumTri());
+  printBoundingBox3(mani_geom.getBoundingBox());
+}
+#endif // ENABLE_MANIFOLD
 
 void LogVisitor::printCamera(const Camera& camera)
 {
   if (is_enabled(RenderStatistic::CAMERA)) {
-    LOG(message_group::None, Location::NONE, "", "Camera:");
-    LOG(message_group::None, Location::NONE, "", "   Translation: %1$.2f, %2$.2f, %3$.2f", camera.getVpt().x(), camera.getVpt().y(), camera.getVpt().z());
-    LOG(message_group::None, Location::NONE, "", "   Rotation:    %1$.2f, %2$.2f, %3$.2f", camera.getVpr().x(), camera.getVpr().y(), camera.getVpr().z());
-    LOG(message_group::None, Location::NONE, "", "   Distance:    %1$.2f", camera.zoomValue());
-    LOG(message_group::None, Location::NONE, "", "   FOV:         %1$.2f", camera.fovValue());
+    LOG("Camera:");
+    LOG("   Translation: %1$.2f, %2$.2f, %3$.2f", camera.getVpt().x(), camera.getVpt().y(), camera.getVpt().z());
+    LOG("   Rotation:    %1$.2f, %2$.2f, %3$.2f", camera.getVpr().x(), camera.getVpr().y(), camera.getVpr().z());
+    LOG("   Distance:    %1$.2f", camera.zoomValue());
+    LOG("   FOV:         %1$.2f", camera.fovValue());
   }
 }
 
@@ -289,7 +318,7 @@ void LogVisitor::printCacheStatistic()
 void LogVisitor::printRenderingTime(const std::chrono::milliseconds ms)
 {
   // always enabled
-  LOG(message_group::None, Location::NONE, "", "Total rendering time: %1$d:%2$02d:%3$02d.%4$03d",
+  LOG("Total rendering time: %1$d:%2$02d:%3$02d.%4$03d",
       (ms.count() / 1000 / 60 / 60),
       (ms.count() / 1000 / 60 % 60),
       (ms.count() / 1000 % 60),
@@ -312,7 +341,7 @@ void StreamVisitor::visit(const Polygon2d& poly)
     geometryJson["convex"] = poly.is_convex();
     geometryJson["contours"] = poly.outlines().size();
     if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
-      geometryJson["bounding_box"] = getBoundingBox2(poly);
+      geometryJson["bounding_box"] = getBoundingBox2d(poly);
     }
     json["geometry"] = geometryJson;
   }
@@ -324,10 +353,11 @@ void StreamVisitor::visit(const PolySet& ps)
     assert(ps.getDimension() == 3);
     nlohmann::json geometryJson;
     geometryJson["dimensions"] = 3;
-    geometryJson["convex"] = ps.is_convex();
+    geometryJson["convex"] = ps.isConvex();
+    geometryJson["triangular"] = ps.isTriangular();
     geometryJson["facets"] = ps.numFacets();
     if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
-      geometryJson["bounding_box"] = getBoundingBox3(ps);
+      geometryJson["bounding_box"] = getBoundingBox3d(ps);
     }
     json["geometry"] = geometryJson;
   }
@@ -345,26 +375,29 @@ void StreamVisitor::visit(const CGAL_Nef_polyhedron& nef)
     geometryJson["facets"] = nef.p3->number_of_facets();
     geometryJson["volumes"] = nef.p3->number_of_volumes();
     if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
-      geometryJson["bounding_box"] = getBoundingBox3(nef);
-    }
-    json["geometry"] = geometryJson;
-  }
-}
-void StreamVisitor::visit(const CGALHybridPolyhedron& poly)
-{
-  if (is_enabled(RenderStatistic::GEOMETRY)) {
-    nlohmann::json geometryJson;
-    geometryJson["dimensions"] = 3;
-    geometryJson["simple"] = poly.isManifold();
-    geometryJson["vertices"] = poly.numVertices();
-    geometryJson["facets"] = poly.numFacets();
-    if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
-      geometryJson["bounding_box"] = getBoundingBox3(poly);
+      geometryJson["bounding_box"] = getBoundingBox3d(nef);
     }
     json["geometry"] = geometryJson;
   }
 }
 #endif // ENABLE_CGAL
+
+#ifdef ENABLE_MANIFOLD
+void StreamVisitor::visit(const ManifoldGeometry& mani)
+{
+  if (is_enabled(RenderStatistic::GEOMETRY)) {
+    nlohmann::json geometryJson;
+    geometryJson["dimensions"] = 3;
+    geometryJson["simple"] = mani.isManifold();
+    geometryJson["vertices"] = mani.numVertices();
+    geometryJson["facets"] = mani.numFacets();
+    if (is_enabled(RenderStatistic::BOUNDING_BOX)) {
+      geometryJson["bounding_box"] = getBoundingBox3d(mani);
+    }
+    json["geometry"] = geometryJson;
+  }
+}
+#endif // ENABLE_MANIFOLD
 
 void StreamVisitor::printCamera(const Camera& camera)
 {

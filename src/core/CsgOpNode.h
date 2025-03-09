@@ -1,7 +1,10 @@
 #pragma once
 
-#include "node.h"
-#include "enums.h"
+#include <string>
+
+#include "core/node.h"
+#include "core/ModuleInstantiation.h"
+#include "core/enums.h"
 
 class CsgOpNode : public AbstractNode
 {

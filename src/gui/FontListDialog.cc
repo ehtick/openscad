@@ -24,10 +24,15 @@
  *
  */
 
+#include "gui/FontListDialog.h"
+
+#include <QAbstractItemView>
+#include <QApplication>
+#include <QItemSelection>
+#include <QModelIndex>
 #include <QClipboard>
 #include <QSortFilterProxyModel>
 
-#include "FontListDialog.h"
 #include "FontCache.h"
 
 FontListDialog::FontListDialog()
@@ -35,7 +40,7 @@ FontListDialog::FontListDialog()
   model = nullptr;
   proxy = nullptr;
   setupUi(this);
-  connect(this->okButton, SIGNAL(clicked()), this, SLOT(accept()));
+  connect(this->okButton, &QPushButton::clicked, this, &FontListDialog::accept);
 }
 
 void FontListDialog::on_copyButton_clicked()
@@ -67,7 +72,7 @@ void FontListDialog::selection_changed(const QItemSelection& current, const QIte
   tableView->setDragText(selection);
 }
 
-void FontListDialog::update_font_list()
+void FontListDialog::updateFontList()
 {
   copyButton->setEnabled(false);
 
@@ -88,7 +93,7 @@ void FontListDialog::update_font_list()
 
   int idx = 0;
   for (auto it = list->begin(); it != list->end(); it++, idx++) {
-    FontInfo font_info = (*it);
+    const FontInfo& font_info = (*it);
     auto *family = new QStandardItem(QString(font_info.get_family().c_str()));
     family->setEditable(false);
     model->setItem(idx, 0, family);
@@ -110,7 +115,7 @@ void FontListDialog::update_font_list()
   this->tableView->resizeColumnsToContents();
   this->tableView->setSortingEnabled(true);
 
-  connect(tableView->selectionModel(), SIGNAL(selectionChanged(const QItemSelection&,const QItemSelection&)), this, SLOT(selection_changed(const QItemSelection&,const QItemSelection&)));
+  connect(tableView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &FontListDialog::selection_changed);
 
   delete list;
 }
