@@ -1,19 +1,16 @@
-#include "OpenCSGWarningDialog.h"
-#include "Preferences.h"
+#include "gui/OpenCSGWarningDialog.h"
+#include <QString>
+#include <QWidget>
+#include "gui/Preferences.h"
 
 OpenCSGWarningDialog::OpenCSGWarningDialog(QWidget *)
 {
   setupUi(this);
 
-  connect(this->showBox, SIGNAL(toggled(bool)),
-          Preferences::inst()->openCSGWarningBox, SLOT(setChecked(bool)));
-  connect(this->showBox, SIGNAL(toggled(bool)),
-          Preferences::inst(), SLOT(on_openCSGWarningBox_toggled(bool)));
-
-  connect(this->enableOpenCSGBox, SIGNAL(toggled(bool)),
-          Preferences::inst()->enableOpenCSGBox, SLOT(setChecked(bool)));
-  connect(this->enableOpenCSGBox, SIGNAL(toggled(bool)),
-          Preferences::inst(), SLOT(on_enableOpenCSGBox_toggled(bool)));
+  connect(this->showBox, &QCheckBox::toggled,
+          Preferences::inst()->openCSGWarningBox, &QCheckBox::setChecked);
+  connect(this->showBox, &QCheckBox::toggled,
+          Preferences::inst(), &Preferences::on_openCSGWarningBox_toggled);
 }
 
 void OpenCSGWarningDialog::setText(const QString& text)

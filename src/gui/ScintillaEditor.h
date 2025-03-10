@@ -1,6 +1,13 @@
 #pragma once
 
+#include <QStringList>
+#include <filesystem>
+#include <map>
 #include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -12,9 +19,8 @@
 #include <QVBoxLayout>
 #include <Qsci/qsciscintilla.h>
 
-#include "Editor.h"
-#include "memory.h"
-#include "ScadApi.h"
+#include "gui/Editor.h"
+#include "gui/ScadApi.h"
 
 // don't need the full definition, because it confuses Qt
 class ScadLexer;
@@ -46,7 +52,7 @@ class ScintillaEditor : public EditorInterface
 {
   Q_OBJECT;
 
-  using colorscheme_set_t = std::multimap<int, shared_ptr<EditorColorScheme>, std::less<>>;
+  using colorscheme_set_t = std::multimap<int, std::shared_ptr<EditorColorScheme>, std::less<>>;
 
 public:
   ScintillaEditor(QWidget *parent);
@@ -69,6 +75,10 @@ public:
   QPoint mapToGlobal(const QPoint&) override;
 
   void setCursorPosition(int line, int col) override;
+  void setSelectionIndicatorStatus(EditorSelectionIndicatorStatus satuts, int level, int lineFrom, int colFrom, int lineTo, int colTo) override;
+  void clearAllSelectionIndicators() override;
+  void clearSelectionIndicators(int lineFrom, int colFrom, int lineTo, int colTo);
+
   void setFocus() override;
   void setupAutoComplete(const bool forceOff = false);
 
@@ -135,19 +145,16 @@ public slots:
   void nextBookmark() override;
   void prevBookmark() override;
   void jumpToNextError() override;
+  void applySettings();
+  void onAutocompleteChanged(bool state);
+  void onCharacterThresholdChanged(int val);
 
 private slots:
   void onTextChanged();
   void onUserListSelected(const int id, const QString& text);
-  void applySettings();
-  void onAutocompleteChanged(bool state);
-  void onCharacterThresholdChanged(int val);
   void fireModificationChanged();
   void onIndicatorClicked(int line, int col, Qt::KeyboardModifiers state);
   void onIndicatorReleased(int line, int col, Qt::KeyboardModifiers state);
-
-public:
-  void public_applySettings();
 
 private:
   QVBoxLayout *scintillaLayout;
@@ -159,6 +166,9 @@ private:
   static const int hyperlinkIndicatorOffset = 100;
   static const int errMarkerNumber = 2;
   static const int bmMarkerNumber = 3;
+  static const int selectionMarkerLevelNumber = 20; //20 - 25, there is at max 5 level of depth
+  static const int selectionIndicatorIsActiveNumber = 11; //Represents the active selected area text 11 - 12
+  static const int selectionIndicatorIsImpactedNumber = 14; //Represents the impacted selected area text 14-15-16
 
   bool indicatorsActive = false;
 

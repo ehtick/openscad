@@ -1,13 +1,23 @@
 #pragma once
 
+#include <QStringList>
 #include <QObject>
 #include <QString>
 #include <QWidget>
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QTextEdit>
-#include "IndicatorData.h"
-#include "parameter/ParameterWidget.h"
+#include "core/IndicatorData.h"
+#include "gui/parameter/ParameterWidget.h"
+
+#include <string>
+#include <vector>
+
+enum class EditorSelectionIndicatorStatus
+{
+  SELECTED,
+  IMPACTED
+};
 
 class EditorInterface : public QWidget
 {
@@ -39,6 +49,7 @@ signals:
   void modificationChanged(EditorInterface *);
   void showContextMenuEvent(const QPoint& pos);
   void focusIn();
+  void escapePressed();
 
 public slots:
   virtual void zoomIn() = 0;
@@ -50,6 +61,8 @@ public slots:
   virtual void commentSelection() = 0;
   virtual void uncommentSelection() = 0;
   virtual void setPlainText(const QString&) = 0;
+  virtual void setSelectionIndicatorStatus(EditorSelectionIndicatorStatus status, int level, int lineFrom, int colFrom, int lineTo, int colTo) = 0;
+  virtual void clearAllSelectionIndicators() = 0;
   virtual void highlightError(int) = 0;
   virtual void unhighlightLastError() = 0;
   virtual void setHighlightScheme(const QString&) = 0;

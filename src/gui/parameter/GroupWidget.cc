@@ -1,5 +1,9 @@
-#include "GroupWidget.h"
+#include "gui/parameter/GroupWidget.h"
 
+#include <QObject>
+#include <QSizePolicy>
+#include <QString>
+#include <QWidget>
 #include <QLineEdit>
 
 GroupWidget::GroupWidget(const QString& title, QWidget *parent) : QWidget(parent)
@@ -24,7 +28,7 @@ GroupWidget::GroupWidget(const QString& title, QWidget *parent) : QWidget(parent
   setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
   setLayout(&mainLayout);
 
-  QObject::connect(&toggleButton, SIGNAL(toggled(bool)), this, SLOT(setExpanded(bool)));
+  QObject::connect(&toggleButton, &QToolButton::toggled, this, &GroupWidget::setExpanded);
 }
 
 void GroupWidget::addWidget(QWidget *widget)

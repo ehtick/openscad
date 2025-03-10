@@ -1,25 +1,35 @@
 #include "handle_dep.h"
-#include "printutils.h"
+
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <iostream>
 #include <string>
-#include <sstream>
-#include <cstdlib> // for system()
 #include <unordered_set>
 #include <vector>
-#include <boost/regex.hpp>
-#include <boost/filesystem.hpp>
-namespace fs = boost::filesystem;
-
-#ifndef _WIN32 // NOT _WIN32
+#ifndef _WIN32
 #include <sys/wait.h>
-#endif // NOT _WIN32
+#endif
 
-std::unordered_set<std::string> dependencies;
+#include <boost/regex.hpp>
+
+#include "utils/printutils.h"
+
+namespace fs = std::filesystem;
+
 const char *make_command = nullptr;
+
+namespace {
+  
+std::unordered_set<std::string> dependencies;
+
+}  // namespace
 
 void handle_dep(const std::string& filename)
 {
-  fs::path filepath(filename);
-  std::string dep = boost::regex_replace(filepath.generic_string(), boost::regex("\\ "), "\\\\ ");
+  const fs::path filepath(filename);
+  const std::string dep = boost::regex_replace(filepath.generic_string(), boost::regex("\\ "), "\\\\ ");
   if (dependencies.find(dep) != dependencies.end()) {
     return; // included and used files are very likely to be added many times by the parser
   }

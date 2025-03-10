@@ -1,5 +1,11 @@
-#include "ParameterVector.h"
-#include "IgnoreWheelWhenNotFocused.h"
+#include "gui/parameter/ParameterVector.h"
+
+#include <QWidget>
+#include <algorithm>
+#include <cassert>
+#include <limits>
+#include <cstddef>
+#include "gui/IgnoreWheelWhenNotFocused.h"
 
 ParameterVector::ParameterVector(QWidget *parent, VectorParameter *parameter, DescriptionStyle descriptionStyle) :
   ParameterVirtualWidget(parent, parameter),
@@ -74,8 +80,8 @@ ParameterVector::ParameterVector(QWidget *parent, VectorParameter *parameter, De
     spinbox->setRange(minimum, maximum);
     spinbox->setSingleStep(step);
     spinbox->show();
-    connect(spinbox, SIGNAL(valueChanged(double)), this, SLOT(onChanged()));
-    connect(spinbox, SIGNAL(editingFinished()), this, SLOT(onEditingFinished()));
+    connect(spinbox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &ParameterVector::onChanged);
+    connect(spinbox, &QDoubleSpinBox::editingFinished, this, &ParameterVector::onEditingFinished);
   }
 
   ParameterVector::setValue();

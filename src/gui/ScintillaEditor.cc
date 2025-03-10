@@ -1,25 +1,40 @@
-#include <ciso646> // C alternative tokens (xor)
+#include "gui/ScintillaEditor.h"
+
+#include <QColor>
+#include <QCursor>
+#include <QEvent>
+#include <QGuiApplication>
+#include <QMenu>
+#include <QObject>
+#include <QTimer>
+#include <QVBoxLayout>
+#include <QWidget>
+#include <functional>
+#include <exception>
+#include <memory>
 #include <cstdlib>
+#include <string>
+#include <vector>
 #include <algorithm>
-#include <boost/filesystem.hpp>
+#include <filesystem>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <QString>
 #include <QChar>
+#include <QRegularExpression>
 #include <QShortcut>
 #include <Qsci/qscicommandset.h>
 
-#include "ScintillaEditor.h"
-#include "Preferences.h"
-#include "PlatformUtils.h"
-#include "Settings.h"
-#include "ScadLexer.h"
+#include "gui/Preferences.h"
+#include "platform/PlatformUtils.h"
+#include "core/Settings.h"
+#include "gui/ScadLexer.h"
 
 #include <QWheelEvent>
 #include <QPoint>
 #include <QToolTip>
 
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 
 const QString ScintillaEditor::cursorPlaceHolder = "^~^";
 
@@ -91,7 +106,7 @@ EditorColorScheme::EditorColorScheme(const fs::path& path) : path(path)
     _name = QString::fromStdString(pt.get<std::string>("name"));
     _index = pt.get<int>("index");
   } catch (const std::exception& e) {
-    LOG(message_group::None, Location::NONE, "", "Error reading color scheme file '%1$s': %2$s", path.generic_string(), e.what());
+    LOG("Error reading color scheme file '%1$s': %2$s", path.generic_string(), e.what());
     _name = "";
     _index = 0;
   }
@@ -137,7 +152,7 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   //
   QsciCommand *c;
   // NOLINTBEGIN(bugprone-suspicious-enum-usage)
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
   // Alt-Backspace should delete left word (Alt-Delete already deletes right word)
   c = qsci->standardCommands()->find(QsciCommand::DeleteWordLeft);
   c->setKey(Qt::Key_Backspace | Qt::ALT);
@@ -153,7 +168,7 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   c->setKey(Qt::Key_Z | Qt::CTRL | Qt::SHIFT);
   c->setAlternateKey(Qt::Key_Y | Qt::CTRL);
 
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
   const unsigned long modifier = Qt::META;
 #else
   const unsigned long modifier = Qt::CTRL;
@@ -181,8 +196,22 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 
   qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, errorIndicatorNumber);
   qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, findIndicatorNumber);
+  qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, selectionIndicatorIsActiveNumber);
+  qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, selectionIndicatorIsActiveNumber + 1);
+  qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, selectionIndicatorIsImpactedNumber);
+  qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, selectionIndicatorIsImpactedNumber + 1);
+  qsci->indicatorDefine(QsciScintilla::RoundBoxIndicator, selectionIndicatorIsImpactedNumber + 2);
+
   qsci->markerDefine(QsciScintilla::Circle, errMarkerNumber);
   qsci->markerDefine(QsciScintilla::Bookmark, bmMarkerNumber);
+
+  qsci->markerDefine('1', selectionMarkerLevelNumber);
+  qsci->markerDefine('2', selectionMarkerLevelNumber + 1);
+  qsci->markerDefine('3', selectionMarkerLevelNumber + 2);
+  qsci->markerDefine('4', selectionMarkerLevelNumber + 3);
+  qsci->markerDefine('5', selectionMarkerLevelNumber + 4);
+  qsci->markerDefine('+', selectionMarkerLevelNumber + 5);
+
 
   qsci->setMarginType(numberMargin, QsciScintilla::NumberMargin);
   qsci->setMarginLineNumbers(numberMargin, true);
@@ -191,7 +220,7 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
   qsci->setMarginType(symbolMargin, QsciScintilla::SymbolMargin);
   qsci->setMarginLineNumbers(symbolMargin, false);
   qsci->setMarginWidth(symbolMargin, 0);
-  qsci->setMarginMarkerMask(symbolMargin, 1 << errMarkerNumber | 1 << bmMarkerNumber);
+  qsci->setMarginMarkerMask(symbolMargin, 1 << errMarkerNumber | 1 << bmMarkerNumber | 1 << selectionMarkerLevelNumber | 1 << (selectionMarkerLevelNumber + 1) | 1 << (selectionMarkerLevelNumber + 2) | 1 << (selectionMarkerLevelNumber + 3) | 1 << (selectionMarkerLevelNumber + 4) | 1 << (selectionMarkerLevelNumber + 5));
 
 #if ENABLE_LEXERTL
   auto newLexer = new ScadLexer2(this);
@@ -203,24 +232,24 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 
   initMargin();
 
-  connect(qsci, SIGNAL(textChanged()), this, SIGNAL(contentsChanged()));
-  connect(qsci, SIGNAL(modificationChanged(bool)), this, SLOT(fireModificationChanged()));
-  connect(qsci, SIGNAL(userListActivated(int,const QString&)), this, SLOT(onUserListSelected(const int,const QString&)));
+  connect(qsci, &QsciScintilla::textChanged, this, &ScintillaEditor::contentsChanged);
+  connect(qsci, &QsciScintilla::modificationChanged, this, &ScintillaEditor::fireModificationChanged);
+  connect(qsci, &QsciScintilla::userListActivated, this, &ScintillaEditor::onUserListSelected);
   qsci->installEventFilter(this);
   qsci->viewport()->installEventFilter(this);
 
   qsci->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(qsci, SIGNAL(customContextMenuRequested(const QPoint&)), this, SIGNAL(showContextMenuEvent(const QPoint&)));
+  connect(qsci, &QsciScintilla::customContextMenuRequested, this, &ScintillaEditor::showContextMenuEvent);
 
   qsci->indicatorDefine(QsciScintilla::ThinCompositionIndicator, hyperlinkIndicatorNumber);
   qsci->SendScintilla(QsciScintilla::SCI_INDICSETSTYLE, hyperlinkIndicatorNumber, QsciScintilla::INDIC_HIDDEN);
-  connect(qsci, SIGNAL(indicatorClicked(int,int,Qt::KeyboardModifiers)), this, SLOT(onIndicatorClicked(int,int,Qt::KeyboardModifiers)));
-  connect(qsci, SIGNAL(indicatorReleased(int,int,Qt::KeyboardModifiers)), this, SLOT(onIndicatorReleased(int,int,Qt::KeyboardModifiers)));
+  connect(qsci, &QsciScintilla::indicatorClicked, this, &ScintillaEditor::onIndicatorClicked);
+  connect(qsci, &QsciScintilla::indicatorReleased, this, &ScintillaEditor::onIndicatorReleased);
 
 #if QSCINTILLA_VERSION >= 0x020b00
-  connect(qsci, SIGNAL(SCN_URIDROPPED(const QUrl&)), this, SIGNAL(uriDropped(const QUrl&)));
+  connect(qsci, &QsciScintilla::SCN_URIDROPPED, this, &ScintillaEditor::uriDropped);
 #endif
-  connect(qsci, SIGNAL(SCN_FOCUSIN()), this, SIGNAL(focusIn()));
+  connect(qsci, &QsciScintilla::SCN_FOCUSIN, this, &ScintillaEditor::focusIn);
 
   // Disabling buffered drawing resolves non-integer HiDPI scaling.
   qsci->SendScintilla(QsciScintillaBase::SCI_SETBUFFEREDDRAW, false);
@@ -265,7 +294,7 @@ void ScintillaEditor::addTemplate(const fs::path& path)
 
         templateMap.insert(key, ScadTemplate(content, cursor_offset));
       } catch (const std::exception& e) {
-        LOG(message_group::None, Location::NONE, "", "Error reading template file '%1$s': %2$s", path.generic_string(), e.what());
+        LOG("Error reading template file '%1$s': %2$s", path.generic_string(), e.what());
       }
     }
   }
@@ -345,11 +374,6 @@ void ScintillaEditor::setupAutoComplete(const bool forceOff)
 void ScintillaEditor::fireModificationChanged()
 {
   emit modificationChanged(this);
-}
-
-void ScintillaEditor::public_applySettings()
-{
-  applySettings();
 }
 
 void ScintillaEditor::setPlainText(const QString& text)
@@ -556,6 +580,23 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
 
     qsci->setMarkerBackgroundColor(readColor(colors, "error-marker", QColor(255, 0, 0, 100)), errMarkerNumber);
     qsci->setMarkerBackgroundColor(readColor(colors, "bookmark-marker", QColor(150, 200, 255, 100)), bmMarkerNumber); // light blue
+    qsci->setMarkerBackgroundColor(readColor(colors, "reference-marker1", QColor(11, 156, 49, 100)), selectionMarkerLevelNumber);
+    qsci->setMarkerBackgroundColor(readColor(colors, "reference-marker2", QColor(11, 156, 49, 50)), selectionMarkerLevelNumber + 1);
+    qsci->setMarkerBackgroundColor(readColor(colors, "reference-marker3", QColor(11, 156, 49, 50)), selectionMarkerLevelNumber + 2);
+    qsci->setMarkerBackgroundColor(readColor(colors, "reference-marker4", QColor(11, 156, 49, 50)), selectionMarkerLevelNumber + 3);
+    qsci->setMarkerBackgroundColor(readColor(colors, "reference-marker5", QColor(11, 156, 49, 50)), selectionMarkerLevelNumber + 4);
+    qsci->setMarkerBackgroundColor(readColor(colors, "reference-marker6", QColor(11, 156, 49, 50)), selectionMarkerLevelNumber + 5);
+    qsci->setMarkerBackgroundColor(readColor(colors, "bookmark-marker", QColor(150, 200, 255, 50)), bmMarkerNumber); // light blue
+    qsci->setIndicatorForegroundColor(readColor(colors, "selected-highlight-indicator", QColor(11, 156, 49, 100)), selectionIndicatorIsActiveNumber); //light green
+    qsci->setIndicatorOutlineColor(readColor(colors, "selected-highlight-indicator-outline", QColor(11, 156, 49, 100)), selectionIndicatorIsActiveNumber); //light green
+    qsci->setIndicatorForegroundColor(readColor(colors, "selected-highlight1-indicator", QColor(11, 156, 49, 50)), selectionIndicatorIsActiveNumber + 1); //light green
+    qsci->setIndicatorOutlineColor(readColor(colors, "selected-highlight1-indicator-outline", QColor(11, 156, 49, 50)), selectionIndicatorIsActiveNumber + 1); //light green
+    qsci->setIndicatorForegroundColor(readColor(colors, "referenced-highlight0-indicator", QColor(255, 128, 128, 100)), selectionIndicatorIsImpactedNumber); //light green
+    qsci->setIndicatorOutlineColor(readColor(colors, "referenced-highlight0-indicator-outline", QColor(255, 128, 128, 100)), selectionIndicatorIsImpactedNumber); //light green
+    qsci->setIndicatorForegroundColor(readColor(colors, "referenced-highlight1-indicator", QColor(255, 128, 128, 100)), selectionIndicatorIsImpactedNumber + 1); //light green
+    qsci->setIndicatorOutlineColor(readColor(colors, "referenced-highlight1-indicator-outline", QColor(255, 128, 128, 80)), selectionIndicatorIsImpactedNumber + 1); //light green
+    qsci->setIndicatorForegroundColor(readColor(colors, "referenced-highlight2-indicator", QColor(255, 128, 128, 100)), selectionIndicatorIsImpactedNumber + 2); //light green
+    qsci->setIndicatorOutlineColor(readColor(colors, "referenced-highlight2-indicator-outline", QColor(255, 128, 128, 60)), selectionIndicatorIsImpactedNumber + 2); //light green
     qsci->setIndicatorForegroundColor(readColor(colors, "error-indicator", QColor(255, 0, 0, 100)), errorIndicatorNumber); //red
     qsci->setIndicatorOutlineColor(readColor(colors, "error-indicator-outline", QColor(255, 0, 0, 100)), errorIndicatorNumber); //red
     qsci->setIndicatorForegroundColor(readColor(colors, "find-indicator", QColor(255, 255, 0, 100)), findIndicatorNumber); //yellow
@@ -588,6 +629,24 @@ void ScintillaEditor::noColor()
   qsci->setCaretForegroundColor(Qt::black);
   qsci->setMarkerBackgroundColor(QColor(255, 0, 0, 100), errMarkerNumber);
   qsci->setMarkerBackgroundColor(QColor(150, 200, 255, 100), bmMarkerNumber); // light blue
+  qsci->setMarkerBackgroundColor(QColor(11, 156, 49, 100), selectionMarkerLevelNumber);
+  qsci->setMarkerBackgroundColor(QColor(11, 156, 49, 50), selectionMarkerLevelNumber + 1);
+  qsci->setMarkerBackgroundColor(QColor(11, 156, 49, 50), selectionMarkerLevelNumber + 2);
+  qsci->setMarkerBackgroundColor(QColor(11, 156, 49, 50), selectionMarkerLevelNumber + 3);
+  qsci->setMarkerBackgroundColor(QColor(11, 156, 49, 50), selectionMarkerLevelNumber + 4);
+  qsci->setMarkerBackgroundColor(QColor(11, 156, 49, 50), selectionMarkerLevelNumber + 5);
+  qsci->setMarkerBackgroundColor(QColor(150, 200, 255, 100), bmMarkerNumber); // light blue
+  qsci->setIndicatorForegroundColor(QColor(11, 156, 49, 100), selectionIndicatorIsActiveNumber);
+  qsci->setIndicatorOutlineColor(QColor(0, 0, 0, 255), selectionIndicatorIsActiveNumber);
+  qsci->setIndicatorForegroundColor(QColor(11, 156, 49, 50), selectionIndicatorIsActiveNumber + 1);
+  qsci->setIndicatorOutlineColor(QColor(0, 0, 0, 255), selectionIndicatorIsActiveNumber + 1);
+  qsci->setIndicatorForegroundColor(QColor(255, 128, 128, 100), selectionIndicatorIsImpactedNumber);
+  qsci->setIndicatorOutlineColor(QColor(0, 0, 0, 255), selectionIndicatorIsImpactedNumber);
+  qsci->setIndicatorForegroundColor(QColor(255, 128, 128, 80), selectionIndicatorIsImpactedNumber + 1);
+  qsci->setIndicatorOutlineColor(QColor(0, 0, 0, 255), selectionIndicatorIsImpactedNumber + 1);
+  qsci->setIndicatorForegroundColor(QColor(255, 128, 128, 60), selectionIndicatorIsImpactedNumber + 2);
+  qsci->setIndicatorOutlineColor(QColor(0, 0, 0, 255), selectionIndicatorIsImpactedNumber + 2);
+
   qsci->setIndicatorForegroundColor(QColor(255, 0, 0, 128), errorIndicatorNumber); //red
   qsci->setIndicatorOutlineColor(QColor(0, 0, 0, 255), errorIndicatorNumber); // only alpha part is used
   qsci->setIndicatorForegroundColor(QColor(255, 255, 0, 128), findIndicatorNumber); //yellow
@@ -724,7 +783,7 @@ void ScintillaEditor::initFont(const QString& fontName, uint size)
 
 void ScintillaEditor::initMargin()
 {
-  connect(qsci, SIGNAL(textChanged()), this, SLOT(onTextChanged()));
+  connect(qsci, &QsciScintilla::textChanged, this, &ScintillaEditor::onTextChanged);
 }
 
 void ScintillaEditor::onTextChanged()
@@ -911,6 +970,12 @@ QString ScintillaEditor::selectedText()
 
 bool ScintillaEditor::eventFilter(QObject *obj, QEvent *e)
 {
+  if (e->type() == QEvent::KeyPress) {
+    auto keyEvent = static_cast<QKeyEvent *>(e);
+    if (keyEvent->key() == Qt::Key_Escape) {
+      emit escapePressed();
+    }
+  }
   if (QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier) || QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier)) {
     if (!this->indicatorsActive) {
       this->indicatorsActive = true;
@@ -1072,7 +1137,7 @@ bool ScintillaEditor::handleKeyEventNavigateNumber(QKeyEvent *keyEvent)
 {
   static bool previewAfterUndo = false;
 
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
   unsigned int navigateOnNumberModifiers = Qt::AltModifier | Qt::ShiftModifier | Qt::KeypadModifier;
 #else
   unsigned int navigateOnNumberModifiers = Qt::AltModifier;
@@ -1099,7 +1164,7 @@ bool ScintillaEditor::handleKeyEventNavigateNumber(QKeyEvent *keyEvent)
   if (previewAfterUndo && keyEvent->type() == QEvent::KeyPress) {
     int k = keyEvent->key() | keyEvent->modifiers();
     auto *cmd = qsci->standardCommands()->boundTo(k);
-    if (cmd && (cmd->command() == QsciCommand::Undo || cmd->command() == QsciCommand::Redo)) QTimer::singleShot(0, this, SIGNAL(previewRequest()));
+    if (cmd && (cmd->command() == QsciCommand::Undo || cmd->command() == QsciCommand::Redo)) QTimer::singleShot(0, this, &ScintillaEditor::previewRequest);
     else if (cmd || !keyEvent->text().isEmpty()) {
       // any insert or command (but not undo/redo) cancels the preview after undo
       previewAfterUndo = false;
@@ -1123,12 +1188,16 @@ bool ScintillaEditor::handleWheelEventNavigateNumber(QWheelEvent *wheelEvent)
   }
 
   if (modifier) {
-    if (wheelEvent->angleDelta().y() < 0) {
+    int delta = wheelEvent->angleDelta().y() != 0
+      ? wheelEvent->angleDelta().y()
+      : wheelEvent->angleDelta().x();
+
+    if (delta < 0) {
       if (modifyNumber(Qt::Key_Down)) {
         previewAfterUndo = true;
       }
     } else {
-      // wheelEvent->delta() > 0
+      // delta > 0
       if (modifyNumber(Qt::Key_Up)) {
         previewAfterUndo = true;
       }
@@ -1140,7 +1209,7 @@ bool ScintillaEditor::handleWheelEventNavigateNumber(QWheelEvent *wheelEvent)
   if (previewAfterUndo) {
     int k = wheelEvent->buttons() & Qt::LeftButton;
     auto *cmd = qsci->standardCommands()->boundTo(k);
-    if (cmd && (cmd->command() == QsciCommand::Undo || cmd->command() == QsciCommand::Redo)) QTimer::singleShot(0, this, SIGNAL(previewRequest()));
+    if (cmd && (cmd->command() == QsciCommand::Undo || cmd->command() == QsciCommand::Redo)) QTimer::singleShot(0, this, &ScintillaEditor::previewRequest);
     else if (cmd || wheelEvent->angleDelta().y()) {
       // any insert or command (but not undo/redo) cancels the preview after undo
       previewAfterUndo = false;
@@ -1155,11 +1224,11 @@ void ScintillaEditor::navigateOnNumber(int key)
   qsci->getCursorPosition(&line, &index);
   auto text = qsci->text(line);
   auto left = text.left(index);
-  auto dotOnLeft = left.contains(QRegExp("\\.\\d*$"));
+  auto dotOnLeft = left.contains(QRegularExpression("\\.\\d*$"));
   auto dotJustLeft = index > 1 && text[index - 2] == '.';
   auto dotJustRight = text[index] == '.';
-  auto numOnLeft = left.contains(QRegExp("\\d\\.?$")) || left.endsWith("-.");
-  auto numOnRight = text.indexOf(QRegExp("\\.?\\d"), index) == index;
+  auto numOnLeft = left.contains(QRegularExpression("\\d\\.?$")) || left.endsWith("-.");
+  auto numOnRight = text.indexOf(QRegularExpression("\\.?\\d"), index) == index;
 
   switch (key) {
   case Qt::Key_Left:
@@ -1193,16 +1262,16 @@ bool ScintillaEditor::modifyNumber(int key)
   qsci->SendScintilla(QsciScintilla::SCI_SETEMPTYSELECTION);
   qsci->setCursorPosition(line, index);
 
-  auto begin = QRegExp(R"([-+]?\d*\.?\d*$)").indexIn(text.left(index));
+  auto begin = text.left(index).indexOf(QRegularExpression(R"([-+]?\d*\.?\d*$)"));
 
-  QRegExp rx("[_a-zA-Z]");
+  QRegularExpression rx(QRegularExpression::anchoredPattern(QString("[_a-zA-Z]")));
   auto check = text.mid(begin - 1, 1);
-  if (rx.exactMatch(check)) return false;
+  if (rx.match(check).hasMatch()) return false;
 
-  auto end = text.indexOf(QRegExp("[^0-9.]"), index);
+  auto end = text.indexOf(QRegularExpression("[^0-9.]"), index);
   if (end < 0) end = text.length();
   auto nr = text.mid(begin, end - begin);
-  if (!(nr.contains(QRegExp(R"(^[-+]?\d*\.?\d+$)")) && nr.contains(QRegExp("\\d"))) ) return false;
+  if (!(nr.contains(QRegularExpression(R"(^[-+]?\d*\.?\d+$)")) && nr.contains(QRegularExpression("\\d"))) ) return false;
   auto sign = nr[0] == '+'||nr[0] == '-';
   if (nr.endsWith('.')) nr = nr.left(nr.length() - 1);
   auto curpos = index - begin;
@@ -1384,10 +1453,13 @@ void ScintillaEditor::setCursorPosition(int line, int col)
 
 void ScintillaEditor::updateSymbolMarginVisibility()
 {
-  if (qsci->markerFindNext(0, 1 << bmMarkerNumber | 1 << errMarkerNumber) < 0) {
+  if (qsci->markerFindNext(0, 1 << bmMarkerNumber | 1 << errMarkerNumber | 1 << selectionMarkerLevelNumber |
+                           1 << (selectionMarkerLevelNumber + 1) | 1 << (selectionMarkerLevelNumber + 2) |
+                           1 << (selectionMarkerLevelNumber + 3) | 1 << (selectionMarkerLevelNumber + 4) |
+                           1 << (selectionMarkerLevelNumber + 5)) < 0) {
     qsci->setMarginWidth(symbolMargin, 0);
   } else {
-    qsci->setMarginWidth(symbolMargin, "00");
+    qsci->setMarginWidth(symbolMargin, "0");
   }
 }
 
@@ -1414,7 +1486,7 @@ void ScintillaEditor::findMarker(int findStartOffset, int wrapStart, const std::
   }
   if (line != -1) {
     // make sure we don't wrap into new line
-    int len = qsci->text(line).remove(QRegExp("[\n\r]$")).length();
+    int len = qsci->text(line).remove(QRegularExpression("[\n\r]$")).length();
     int col = std::min(index, len);
     qsci->setCursorPosition(line, col);
   }
@@ -1445,4 +1517,74 @@ void ScintillaEditor::setFocus()
 {
   qsci->setFocus();
   qsci->SendScintilla(QsciScintilla::SCI_SETFOCUS, true);
+}
+
+/**
+ * @brief Highlights a part of the text according to the limits described in the parameters
+ */
+void ScintillaEditor::setSelectionIndicatorStatus(EditorSelectionIndicatorStatus status, int level, int lineFrom, int colFrom, int lineTo, int colTo)
+{
+  // replace all the indicators at given lines/column with the new one
+  clearSelectionIndicators(lineFrom, colFrom, lineTo, colTo);
+
+  int indicator_base_index = 0;
+  int indicator_level = 0;
+  int mark_level = 0;
+  if (status == EditorSelectionIndicatorStatus::SELECTED) {
+    indicator_base_index = selectionIndicatorIsActiveNumber;
+    mark_level = (level > 5)?5:level;
+    indicator_level = (level > 1)?1:level;
+  } else {
+    indicator_base_index = selectionIndicatorIsImpactedNumber;
+    indicator_level = (level > 2)?2:level;
+  }
+
+  clearSelectionIndicators(lineFrom, colFrom, lineTo, colTo);
+  qsci->fillIndicatorRange(lineFrom, colFrom, lineTo, colTo,  indicator_base_index + indicator_level);
+
+  if (status == EditorSelectionIndicatorStatus::SELECTED) {
+    qsci->ensureLineVisible(std::max(lineFrom - setCursorPositionVisibleLines, 0));
+    qsci->ensureLineVisible(std::min(lineFrom + setCursorPositionVisibleLines, qsci->lines() - 1));
+
+    // replace the marker at provide line with a new one.
+    qsci->markerDelete(lineFrom);
+
+    qsci->markerAdd(lineFrom, selectionMarkerLevelNumber + mark_level);
+    updateSymbolMarginVisibility();
+  }
+}
+
+/**
+ * @brief Unhighlight all the selection indicators.
+ */
+void ScintillaEditor::clearAllSelectionIndicators()
+{
+  // remove all the indicator in the document.
+  int line, column;
+  qsci->lineIndexFromPosition(qsci->length(), &line, &column);
+  clearSelectionIndicators(0, 0, line, column);
+
+  // remove all the markers
+  qsci->markerDeleteAll(selectionMarkerLevelNumber);
+  qsci->markerDeleteAll(selectionMarkerLevelNumber + 1);
+  qsci->markerDeleteAll(selectionMarkerLevelNumber + 2);
+  qsci->markerDeleteAll(selectionMarkerLevelNumber + 3);
+  qsci->markerDeleteAll(selectionMarkerLevelNumber + 4);
+  qsci->markerDeleteAll(selectionMarkerLevelNumber + 5);
+
+  // if there is no more marker... hide the dedicated area in the editor
+  updateSymbolMarginVisibility();
+}
+
+/**
+ * @brief Unhighlight all the texts for DM
+ */
+void ScintillaEditor::clearSelectionIndicators(int lineFrom, int colFrom, int lineTo, int colTo)
+{
+  qsci->clearIndicatorRange(lineFrom, colFrom, lineTo, colTo, selectionIndicatorIsImpactedNumber);
+  qsci->clearIndicatorRange(lineFrom, colFrom, lineTo, colTo, selectionIndicatorIsImpactedNumber + 1);
+  qsci->clearIndicatorRange(lineFrom, colFrom, lineTo, colTo, selectionIndicatorIsImpactedNumber + 2);
+
+  qsci->clearIndicatorRange(lineFrom, colFrom, lineTo, colTo, selectionIndicatorIsActiveNumber);
+  qsci->clearIndicatorRange(lineFrom, colFrom, lineTo, colTo, selectionIndicatorIsActiveNumber + 1);
 }

@@ -1,4 +1,9 @@
-#include "QWordSearchField.h"
+#include "gui/QWordSearchField.h"
+#include <QFrame>
+#include <QLabel>
+#include <QLineEdit>
+#include <QResizeEvent>
+#include <QString>
 #include <QStyle>
 
 QWordSearchField::QWordSearchField(QFrame *parent) : QLineEdit(parent)
@@ -10,7 +15,7 @@ QWordSearchField::QWordSearchField(QFrame *parent) : QLineEdit(parent)
   fieldLabel->setCursor(Qt::ArrowCursor);
   fieldLabel->setStyleSheet("QLabel { border: none; padding: 0px; }");
   fieldLabel->hide();
-  connect(this, SIGNAL(findCountChanged()), this, SLOT(updateFieldLabel()));
+  connect(this, &QWordSearchField::findCountChanged, this, &QWordSearchField::updateFieldLabel);
   auto frameWidth = style()->pixelMetric(QStyle::PM_DefaultFrameWidth);
   setStyleSheet(QString("QLineEdit { padding-right: %1px; } ").arg(fieldLabel->sizeHint().width() + frameWidth + 1));
   auto minsize = minimumSizeHint();

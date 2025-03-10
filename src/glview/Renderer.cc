@@ -1,21 +1,132 @@
-#include "Renderer.h"
-#include "PolySet.h"
-#include "Polygon2d.h"
-#include "ColorMap.h"
-#include "printutils.h"
-#include "PlatformUtils.h"
-#include "system-gl.h"
+#include "glview/Renderer.h"
+#include "geometry/linalg.h"
+#include "glview/ColorMap.h"
+#include "utils/printutils.h"
+#include "platform/PlatformUtils.h"
+#include "glview/system-gl.h"
 
+#include <sstream>
 #include <Eigen/LU>
 #include <fstream>
+#include <string>
+#include <vector>
 
 #ifndef NULLGL
+
+
+namespace {
+
+GLuint compileShader(const std::string& name, GLuint shader_type) {
+  auto shader_source = ShaderUtils::loadShaderSource(name);
+  const GLuint shader = glCreateShader(shader_type);
+  auto *c_source = shader_source.c_str();
+  glShaderSource(shader, 1, (const GLchar **)&c_source, nullptr);
+  glCompileShader(shader);
+  GLint status;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+  if (!status) {
+    int loglen;
+    char logbuffer[1000];
+    glGetShaderInfoLog(shader, sizeof(logbuffer), &loglen, logbuffer);
+    PRINTDB("OpenGL shader compilation error:\n%s", logbuffer);
+    return 0;
+  }
+  return shader;
+}
+
+}  // namespace
+
+namespace RendererUtils {
+
+CSGMode getCsgMode(const bool highlight_mode, const bool background_mode, const OpenSCADOperator type) {
+  int csgmode = highlight_mode ? CSGMODE_HIGHLIGHT : (background_mode ? CSGMODE_BACKGROUND : CSGMODE_NORMAL);
+  if (type == OpenSCADOperator::DIFFERENCE) csgmode |= CSGMODE_DIFFERENCE_FLAG;
+  return static_cast<CSGMode>(csgmode);
+}
+
+std::string loadShaderSource(const std::string& name) {
+  std::string shaderPath = (PlatformUtils::resourcePath("shaders") / name).string();
+  std::ostringstream buffer;
+  const std::ifstream f(shaderPath);
+  if (f.is_open()) {
+    buffer << f.rdbuf();
+  } else {
+    LOG(message_group::UI_Error, "Cannot open shader source file: '%1$s'", shaderPath);
+  }
+  return buffer.str();
+}
+
+ShaderUtils::ShaderResource compileShaderProgram(const std::string& vs_str, const std::string& fs_str) {
+  int shaderstatus;
+  const char *vs_source = vs_str.c_str();
+  const char *fs_source = fs_str.c_str();
+  // Compile the shaders
+  GL_CHECKD(auto vertex_shader = glCreateShader(GL_VERTEX_SHADER));
+  glShaderSource(vertex_shader, 1, (const GLchar **)&vs_source, nullptr);
+  glCompileShader(vertex_shader);
+  glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &shaderstatus);
+  if (shaderstatus != GL_TRUE) {
+    int loglen;
+    char logbuffer[1000];
+    glGetShaderInfoLog(vertex_shader, sizeof(logbuffer), &loglen, logbuffer);
+    // FIXME: Use OpenCAD log to error instead of stderr
+    fprintf(stderr, __FILE__ ": OpenGL vertex shader Error:\n%.*s\n\n", loglen, logbuffer);
+    return {};
+  }
+
+  GL_CHECKD(auto fragment_shader = glCreateShader(GL_FRAGMENT_SHADER));
+  glShaderSource(fragment_shader, 1, (const GLchar **)&fs_source, nullptr);
+  glCompileShader(fragment_shader);
+  glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &shaderstatus);
+  if (shaderstatus != GL_TRUE) {
+    int loglen;
+    char logbuffer[1000];
+    glGetShaderInfoLog(fragment_shader, sizeof(logbuffer), &loglen, logbuffer);
+    // FIXME: Use OpenCAD log to error instead of stderr
+    fprintf(stderr, __FILE__ ": OpenGL fragment shader Error:\n%.*s\n\n", loglen, logbuffer);
+    return {};
+  }
+
+  // Link
+  auto shader_prog = glCreateProgram();
+  glAttachShader(shader_prog, vertex_shader);
+  glAttachShader(shader_prog, fragment_shader);
+  GL_CHECKD(glLinkProgram(shader_prog));
+
+  GLint status;
+  glGetProgramiv(shader_prog, GL_LINK_STATUS, &status);
+  if (status == GL_FALSE) {
+    int loglen;
+    char logbuffer[1000];
+    glGetProgramInfoLog(shader_prog, sizeof(logbuffer), &loglen, logbuffer);
+    // FIXME: Use OpenCAD log to error instead of stderr
+    fprintf(stderr, __FILE__ ": OpenGL Program Linker Error:\n%.*s\n\n", loglen, logbuffer);
+    return {};
+  } else {
+    glValidateProgram(shader_prog);
+    glGetProgramiv(shader_prog, GL_VALIDATE_STATUS, &status);
+    if (!status) {
+      int loglen;
+      char logbuffer[1000];
+      glGetProgramInfoLog(shader_prog, sizeof(logbuffer), &loglen, logbuffer);
+      // FIXME: Use OpenCAD log to error instead of stderr
+      fprintf(stderr, __FILE__ ": OpenGL Program Validation results:\n%.*s\n\n", loglen, logbuffer);
+      return {};
+    }
+  }
+
+  return {
+    .shader_program = shader_prog,
+    .vertex_shader = vertex_shader,
+    .fragment_shader = fragment_shader,
+  };
+}
+
+}  // namespace RendererUtils
 
 Renderer::Renderer()
 {
   PRINTD("Renderer() start");
-
-  renderer_shader.progid = 0;
 
   // Setup default colors
   // The main colors, MATERIAL and CUTOUT, come from this object's
@@ -25,433 +136,81 @@ Renderer::Renderer()
 
   // MATERIAL is set by this object's colorscheme
   // CUTOUT is set by this object's colorscheme
-  colormap[ColorMode::HIGHLIGHT] = {255, 81, 81, 128};
-  colormap[ColorMode::BACKGROUND] = {180, 180, 180, 128};
+  colormap_[ColorMode::HIGHLIGHT] = {255, 81, 81, 128};
+  colormap_[ColorMode::BACKGROUND] = {180, 180, 180, 128};
   // MATERIAL_EDGES is set by this object's colorscheme
   // CUTOUT_EDGES is set by this object's colorscheme
-  colormap[ColorMode::HIGHLIGHT_EDGES] = {255, 171, 86, 128};
-  colormap[ColorMode::BACKGROUND_EDGES] = {150, 150, 150, 128};
+  colormap_[ColorMode::HIGHLIGHT_EDGES] = {255, 171, 86, 128};
+  colormap_[ColorMode::BACKGROUND_EDGES] = {150, 150, 150, 128};
 
   Renderer::setColorScheme(ColorMap::inst()->defaultColorScheme());
-
-  std::string vs_str = Renderer::loadShaderSource("Preview.vert");
-  std::string fs_str = Renderer::loadShaderSource("Preview.frag");
-  const char *vs_source = vs_str.c_str();
-  const char *fs_source = fs_str.c_str();
-
-  GLint status;
-  GLenum err;
-  auto vs = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vs, 1, (const GLchar **)&vs_source, nullptr);
-  glCompileShader(vs);
-  err = glGetError();
-  if (err != GL_NO_ERROR) {
-    PRINTDB("OpenGL Error: %s\n", gluErrorString(err));
-    return;
-  }
-  glGetShaderiv(vs, GL_COMPILE_STATUS, &status);
-  if (status == GL_FALSE) {
-    int loglen;
-    char logbuffer[1000];
-    glGetShaderInfoLog(vs, sizeof(logbuffer), &loglen, logbuffer);
-    PRINTDB("OpenGL Program Compile Vertex Shader Error:\n%s", logbuffer);
-    return;
-  }
-
-  auto fs = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fs, 1, (const GLchar **)&fs_source, nullptr);
-  glCompileShader(fs);
-  err = glGetError();
-  if (err != GL_NO_ERROR) {
-    PRINTDB("OpenGL Error: %s\n", gluErrorString(err));
-    return;
-  }
-  glGetShaderiv(fs, GL_COMPILE_STATUS, &status);
-  if (status == GL_FALSE) {
-    int loglen;
-    char logbuffer[1000];
-    glGetShaderInfoLog(fs, sizeof(logbuffer), &loglen, logbuffer);
-    PRINTDB("OpenGL Program Compile Fragment Shader Error:\n%s", logbuffer);
-    return;
-  }
-
-  auto edgeshader_prog = glCreateProgram();
-  glAttachShader(edgeshader_prog, vs);
-  glAttachShader(edgeshader_prog, fs);
-  glLinkProgram(edgeshader_prog);
-
-  err = glGetError();
-  if (err != GL_NO_ERROR) {
-    PRINTDB("OpenGL Error: %s\n", gluErrorString(err));
-    return;
-  }
-
-  glGetProgramiv(edgeshader_prog, GL_LINK_STATUS, &status);
-  if (status == GL_FALSE) {
-    int loglen;
-    char logbuffer[1000];
-    glGetProgramInfoLog(edgeshader_prog, sizeof(logbuffer), &loglen, logbuffer);
-    PRINTDB("OpenGL Program Linker Error:\n%s", logbuffer);
-    return;
-  }
-
-  int loglen;
-  char logbuffer[1000];
-  glGetProgramInfoLog(edgeshader_prog, sizeof(logbuffer), &loglen, logbuffer);
-  if (loglen > 0) {
-    PRINTDB("OpenGL Program Link OK:\n%s", logbuffer);
-  }
-  glValidateProgram(edgeshader_prog);
-  glGetProgramInfoLog(edgeshader_prog, sizeof(logbuffer), &loglen, logbuffer);
-  if (loglen > 0) {
-    PRINTDB("OpenGL Program Validation results:\n%s", logbuffer);
-  }
-
-  renderer_shader.progid = edgeshader_prog; // 0
-  renderer_shader.type = EDGE_RENDERING;
-  renderer_shader.data.csg_rendering.color_area = glGetUniformLocation(edgeshader_prog, "color1"); // 1
-  renderer_shader.data.csg_rendering.color_edge = glGetUniformLocation(edgeshader_prog, "color2"); // 2
-  renderer_shader.data.csg_rendering.barycentric = glGetAttribLocation(edgeshader_prog, "barycentric"); // 3
 
   PRINTD("Renderer() end");
 }
 
-void Renderer::resize(int /*w*/, int /*h*/)
+bool Renderer::getColorSchemeColor(Renderer::ColorMode colormode, Color4f& outcolor) const
 {
-}
-
-bool Renderer::getColor(Renderer::ColorMode colormode, Color4f& col) const
-{
-  if (colormode == ColorMode::NONE) return false;
-  if (colormap.count(colormode) > 0) {
-    col = colormap.at(colormode);
+  if (const auto it = colormap_.find(colormode); it != colormap_.end()) {
+    outcolor = it->second;
     return true;
   }
   return false;
 }
 
-std::string Renderer::loadShaderSource(const std::string& name) {
-  std::string shaderPath = (PlatformUtils::resourcePath("shaders") / name).string();
-  std::stringstream buffer;
-  std::ifstream f(shaderPath);
-  if (f.is_open()) {
-    buffer << f.rdbuf();
-  } else {
-    LOG(message_group::UI_Error, Location::NONE, "", "Cannot open shader source file: '%1$s'", shaderPath);
-  }
-  return buffer.str();
-}
-
-Renderer::csgmode_e Renderer::get_csgmode(const bool highlight_mode, const bool background_mode, const OpenSCADOperator type) const {
-  int csgmode = highlight_mode ? CSGMODE_HIGHLIGHT : (background_mode ? CSGMODE_BACKGROUND : CSGMODE_NORMAL);
-  if (type == OpenSCADOperator::DIFFERENCE) csgmode |= CSGMODE_DIFFERENCE_FLAG;
-  return csgmode_e(csgmode);
-}
-
-void Renderer::setColor(const float color[4], const shaderinfo_t *shaderinfo) const
+bool Renderer::getShaderColor(Renderer::ColorMode colormode, const Color4f& object_color,
+                              Color4f& outcolor) const
 {
-  if (shaderinfo && shaderinfo->type != EDGE_RENDERING) {
-    return;
+  // If an object was colored, use that color, except when using the highlight/background operator
+  if ((colormode != ColorMode::BACKGROUND) && (colormode != ColorMode::HIGHLIGHT) && object_color.isValid()) {
+    outcolor = object_color;
+    return true;
   }
 
-  PRINTD("setColor a");
-  Color4f col;
-  getColor(ColorMode::MATERIAL, col);
-  float c[4] = {color[0], color[1], color[2], color[3]};
-  if (c[0] < 0) c[0] = col[0];
-  if (c[1] < 0) c[1] = col[1];
-  if (c[2] < 0) c[2] = col[2];
-  if (c[3] < 0) c[3] = col[3];
-  glColor4fv(c);
-#ifdef ENABLE_OPENCSG
-  if (shaderinfo) {
-    glUniform4f(shaderinfo->data.csg_rendering.color_area, c[0], c[1], c[2], c[3]);
-    glUniform4f(shaderinfo->data.csg_rendering.color_edge, (c[0] + 1) / 2, (c[1] + 1) / 2, (c[2] + 1) / 2, 1.0);
-  }
-#endif
-}
-
-// returns the color which has been set, which may differ from the color input parameter
-Color4f Renderer::setColor(ColorMode colormode, const float color[4], const shaderinfo_t *shaderinfo) const
-{
-  PRINTD("setColor b");
   Color4f basecol;
-  if (getColor(colormode, basecol)) {
+  if (Renderer::getColorSchemeColor(colormode, basecol)) {
+    // In highlight/background mode, pull unset colors from the basecol
     if (colormode == ColorMode::BACKGROUND || colormode != ColorMode::HIGHLIGHT) {
-      basecol = {color[0] >= 0 ? color[0] : basecol[0],
-                 color[1] >= 0 ? color[1] : basecol[1],
-                 color[2] >= 0 ? color[2] : basecol[2],
-                 color[3] >= 0 ? color[3] : basecol[3]};
+      basecol = Color4f(object_color[0] >= 0 ? object_color[0] : basecol[0], object_color[1] >= 0 ? object_color[1] : basecol[1],
+                        object_color[2] >= 0 ? object_color[2] : basecol[2], object_color[3] >= 0 ? object_color[3] : basecol[3]);
     }
-    setColor(basecol.data(), shaderinfo);
+    Color4f col;
+    Renderer::getColorSchemeColor(ColorMode::MATERIAL, col);
+    outcolor = basecol;
+    if (outcolor[0] < 0) outcolor[0] = col[0];
+    if (outcolor[1] < 0) outcolor[1] = col[1];
+    if (outcolor[2] < 0) outcolor[2] = col[2];
+    if (outcolor[3] < 0) outcolor[3] = col[3];
+    return true;
   }
-  return basecol;
+
+  return false;
 }
 
-void Renderer::setColor(ColorMode colormode, const shaderinfo_t *shaderinfo) const
-{
-  PRINTD("setColor c");
-  float c[4] = {-1, -1, -1, -1};
-  setColor(colormode, c, shaderinfo);
-}
 
-/* fill this->colormap with matching entries from the colorscheme. note
+
+/* fill colormap_ with matching entries from the colorscheme. note
    this does not change Highlight or Background colors as they are not
    represented in the colorscheme (yet). Also edgecolors are currently the
    same for CGAL & OpenCSG */
 void Renderer::setColorScheme(const ColorScheme& cs) {
   PRINTD("setColorScheme");
-  colormap[ColorMode::MATERIAL] = ColorMap::getColor(cs, RenderColor::OPENCSG_FACE_FRONT_COLOR);
-  colormap[ColorMode::CUTOUT] = ColorMap::getColor(cs, RenderColor::OPENCSG_FACE_BACK_COLOR);
-  colormap[ColorMode::MATERIAL_EDGES] = ColorMap::getColor(cs, RenderColor::CGAL_EDGE_FRONT_COLOR);
-  colormap[ColorMode::CUTOUT_EDGES] = ColorMap::getColor(cs, RenderColor::CGAL_EDGE_BACK_COLOR);
-  colormap[ColorMode::EMPTY_SPACE] = ColorMap::getColor(cs, RenderColor::BACKGROUND_COLOR);
-  this->colorscheme = &cs;
+  colormap_[ColorMode::MATERIAL] = ColorMap::getColor(cs, RenderColor::OPENCSG_FACE_FRONT_COLOR);
+  colormap_[ColorMode::CUTOUT] = ColorMap::getColor(cs, RenderColor::OPENCSG_FACE_BACK_COLOR);
+  colormap_[ColorMode::MATERIAL_EDGES] = ColorMap::getColor(cs, RenderColor::CGAL_EDGE_FRONT_COLOR);
+  colormap_[ColorMode::CUTOUT_EDGES] = ColorMap::getColor(cs, RenderColor::CGAL_EDGE_BACK_COLOR);
+  colormap_[ColorMode::EMPTY_SPACE] = ColorMap::getColor(cs, RenderColor::BACKGROUND_COLOR);
+  colorscheme_ = &cs;
 }
 
-#ifdef ENABLE_OPENCSG
-static void draw_triangle(const Renderer::shaderinfo_t *shaderinfo, const Vector3d& p0, const Vector3d& p1, const Vector3d& p2,
-                          bool e0, bool e1, bool e2, double z, bool mirror)
-{
-  Renderer::shader_type_t type =
-    (shaderinfo) ? shaderinfo->type : Renderer::NONE;
 
-  // e0,e1,e2 are used to disable some edges from display.
-  // Edges are numbered to correspond with the vertex opposite of them.
-  // The edge shader draws edges when the minimum component of barycentric coords is near 0
-  // Disabled edges have their corresponding components set to 1.0 when they would otherwise be 0.0.
-  double d0 = e0 ? 0.0 : 1.0;
-  double d1 = e1 ? 0.0 : 1.0;
-  double d2 = e2 ? 0.0 : 1.0;
-
-  switch (type) {
-  case Renderer::EDGE_RENDERING:
-    if (mirror) {
-      glVertexAttrib3f(shaderinfo->data.csg_rendering.barycentric, 1.0, d1, d2);
-      glVertex3f(p0[0], p0[1], p0[2] + z);
-      glVertexAttrib3f(shaderinfo->data.csg_rendering.barycentric, d0, d1, 1.0);
-      glVertex3f(p2[0], p2[1], p2[2] + z);
-      glVertexAttrib3f(shaderinfo->data.csg_rendering.barycentric, d0, 1.0, d2);
-      glVertex3f(p1[0], p1[1], p1[2] + z);
-    } else {
-      glVertexAttrib3f(shaderinfo->data.csg_rendering.barycentric, 1.0, d1, d2);
-      glVertex3f(p0[0], p0[1], p0[2] + z);
-      glVertexAttrib3f(shaderinfo->data.csg_rendering.barycentric, d0, 1.0, d2);
-      glVertex3f(p1[0], p1[1], p1[2] + z);
-      glVertexAttrib3f(shaderinfo->data.csg_rendering.barycentric, d0, d1, 1.0);
-      glVertex3f(p2[0], p2[1], p2[2] + z);
-    }
-    break;
-  default:
-  case Renderer::SELECT_RENDERING:
-    glVertex3d(p0[0], p0[1], p0[2] + z);
-    if (!mirror) {
-      glVertex3d(p1[0], p1[1], p1[2] + z);
-    }
-    glVertex3d(p2[0], p2[1], p2[2] + z);
-    if (mirror) {
-      glVertex3d(p1[0], p1[1], p1[2] + z);
-    }
-  }
-}
-#endif // ifdef ENABLE_OPENCSG
-
-static void draw_tri(const Vector3d& p0, const Vector3d& p1, const Vector3d& p2, double z, bool mirror)
-{
-  glVertex3d(p0[0], p0[1], p0[2] + z);
-  if (!mirror) glVertex3d(p1[0], p1[1], p1[2] + z);
-  glVertex3d(p2[0], p2[1], p2[2] + z);
-  if (mirror) glVertex3d(p1[0], p1[1], p1[2] + z);
-}
-
-static void gl_draw_triangle(const Renderer::shaderinfo_t *shaderinfo, const Vector3d& p0, const Vector3d& p1, const Vector3d& p2, bool e0, bool e1, bool e2, double z, bool mirrored)
-{
-  double ax = p1[0] - p0[0], bx = p1[0] - p2[0];
-  double ay = p1[1] - p0[1], by = p1[1] - p2[1];
-  double az = p1[2] - p0[2], bz = p1[2] - p2[2];
-  double nx = ay * bz - az * by;
-  double ny = az * bx - ax * bz;
-  double nz = ax * by - ay * bx;
-  double nl = sqrt(nx * nx + ny * ny + nz * nz);
-  glNormal3d(nx / nl, ny / nl, nz / nl);
-#ifdef ENABLE_OPENCSG
-  if (shaderinfo) {
-    draw_triangle(shaderinfo, p0, p1, p2, e0, e1, e2, z, mirrored);
-  } else
-#endif
-  {
-    draw_tri(p0, p1, p2, z, mirrored);
-  }
-}
-
-void Renderer::render_surface(const PolySet& ps, csgmode_e csgmode, const Transform3d& m, const shaderinfo_t *shaderinfo) const
-{
-  PRINTD("Renderer render");
-  bool mirrored = m.matrix().determinant() < 0;
-
-  if (ps.getDimension() == 2) {
-    // Render 2D objects 1mm thick, but differences slightly larger
-    double zbase = 1 + ((csgmode & CSGMODE_DIFFERENCE_FLAG) ? 0.1 : 0);
-    glBegin(GL_TRIANGLES);
-
-    // Render top+bottom
-    for (double z : {-zbase / 2, zbase / 2}) {
-      for (const auto& poly : ps.polygons) {
-        if (poly.size() == 3) {
-          if (z < 0) {
-            gl_draw_triangle(shaderinfo, poly.at(0), poly.at(2), poly.at(1), true, true, true, z, mirrored);
-          } else {
-            gl_draw_triangle(shaderinfo, poly.at(0), poly.at(1), poly.at(2), true, true, true, z, mirrored);
-          }
-        } else if (poly.size() == 4) {
-          if (z < 0) {
-            gl_draw_triangle(shaderinfo, poly.at(0), poly.at(3), poly.at(1), false, true, true, z, mirrored);
-            gl_draw_triangle(shaderinfo, poly.at(2), poly.at(1), poly.at(3), false, true, true, z, mirrored);
-          } else {
-            gl_draw_triangle(shaderinfo, poly.at(0), poly.at(1), poly.at(3), false, true, true, z, mirrored);
-            gl_draw_triangle(shaderinfo, poly.at(2), poly.at(3), poly.at(1), false, true, true, z, mirrored);
-          }
-        } else {
-          Vector3d center = Vector3d::Zero();
-          for (const auto& point : poly) {
-            center[0] += point[0];
-            center[1] += point[1];
-          }
-          center /= poly.size();
-          for (size_t j = 1; j <= poly.size(); ++j) {
-            if (z < 0) {
-              gl_draw_triangle(shaderinfo, center, poly.at(j % poly.size()), poly.at(j - 1),
-                               true, false, false, z, mirrored);
-            } else {
-              gl_draw_triangle(shaderinfo, center, poly.at(j - 1), poly.at(j % poly.size()),
-                               true, false, false, z, mirrored);
-            }
-          }
-        }
-      }
-    }
-
-    // Render sides
-    if (ps.getPolygon().outlines().size() > 0) {
-      for (const Outline2d& o : ps.getPolygon().outlines()) {
-        for (size_t j = 1; j <= o.vertices.size(); ++j) {
-          Vector3d p1(o.vertices[j - 1][0], o.vertices[j - 1][1], -zbase / 2);
-          Vector3d p2(o.vertices[j - 1][0], o.vertices[j - 1][1], zbase / 2);
-          Vector3d p3(o.vertices[j % o.vertices.size()][0], o.vertices[j % o.vertices.size()][1], -zbase / 2);
-          Vector3d p4(o.vertices[j % o.vertices.size()][0], o.vertices[j % o.vertices.size()][1], zbase / 2);
-          gl_draw_triangle(shaderinfo, p2, p1, p3, true, false, true, 0, mirrored);
-          gl_draw_triangle(shaderinfo, p2, p3, p4, true, true, false, 0, mirrored);
-        }
-      }
-    } else {
-      // If we don't have borders, use the polygons as borders.
-      // FIXME: When is this used?
-      const Polygons *borders_p = &ps.polygons;
-      for (const auto& poly : *borders_p) {
-        for (size_t j = 1; j <= poly.size(); ++j) {
-          Vector3d p1 = poly.at(j - 1), p2 = poly.at(j - 1);
-          Vector3d p3 = poly.at(j % poly.size()), p4 = poly.at(j % poly.size());
-          p1[2] -= zbase / 2, p2[2] += zbase / 2;
-          p3[2] -= zbase / 2, p4[2] += zbase / 2;
-          gl_draw_triangle(shaderinfo, p2, p1, p3, true, false, true, 0, mirrored);
-          gl_draw_triangle(shaderinfo, p2, p3, p4, true, true, false, 0, mirrored);
-        }
-      }
-    }
-    glEnd();
-  } else if (ps.getDimension() == 3) {
-    for (const auto& poly : ps.polygons) {
-      glBegin(GL_TRIANGLES);
-      if (poly.size() == 3) {
-        gl_draw_triangle(shaderinfo, poly.at(0), poly.at(1), poly.at(2), true, true, true, 0, mirrored);
-      } else if (poly.size() == 4) {
-        gl_draw_triangle(shaderinfo, poly.at(0), poly.at(1), poly.at(3), false, true, true, 0, mirrored);
-        gl_draw_triangle(shaderinfo, poly.at(2), poly.at(3), poly.at(1), false, true, true, 0, mirrored);
-      } else {
-        Vector3d center = Vector3d::Zero();
-        for (const auto& point : poly) {
-          center += point;
-        }
-        center /= poly.size();
-        for (size_t j = 1; j <= poly.size(); ++j) {
-          gl_draw_triangle(shaderinfo, center, poly.at(j - 1), poly.at(j % poly.size()), true, false, false, 0, mirrored);
-        }
-      }
-      glEnd();
-    }
-  } else {
-    assert(false && "Cannot render object with no dimension");
-  }
-}
-
-/*! This is used in throwntogether and CGAL mode
-
-   csgmode is set to CSGMODE_NONE in CGAL mode. In this mode a pure 2D rendering is performed.
-
-   For some reason, this is not used to render edges in Preview mode
- */
-void Renderer::render_edges(const PolySet& ps, csgmode_e csgmode) const
-{
-  glDisable(GL_LIGHTING);
-  if (ps.getDimension() == 2) {
-    if (csgmode == Renderer::CSGMODE_NONE) {
-      // Render only outlines
-      for (const Outline2d& o : ps.getPolygon().outlines()) {
-        glBegin(GL_LINE_LOOP);
-        for (const Vector2d& v : o.vertices) {
-          glVertex3d(v[0], v[1], 0);
-        }
-        glEnd();
-      }
-    } else {
-      // Render 2D objects 1mm thick, but differences slightly larger
-      double zbase = 1 + ((csgmode & CSGMODE_DIFFERENCE_FLAG) ? 0.1 : 0);
-
-      for (const Outline2d& o : ps.getPolygon().outlines()) {
-        // Render top+bottom outlines
-        for (double z : { -zbase / 2, zbase / 2}) {
-          glBegin(GL_LINE_LOOP);
-          for (const Vector2d& v : o.vertices) {
-            glVertex3d(v[0], v[1], z);
-          }
-          glEnd();
-        }
-        // Render sides
-        glBegin(GL_LINES);
-        for (const Vector2d& v : o.vertices) {
-          glVertex3d(v[0], v[1], -zbase / 2);
-          glVertex3d(v[0], v[1], +zbase / 2);
-        }
-        glEnd();
-      }
-    }
-  } else if (ps.getDimension() == 3) {
-    for (const auto& polygon : ps.polygons) {
-      const Polygon *poly = &polygon;
-      glBegin(GL_LINE_LOOP);
-      for (const auto& p : *poly) {
-        glVertex3d(p[0], p[1], p[2]);
-      }
-      glEnd();
-    }
-  } else {
-    assert(false && "Cannot render object with no dimension");
-  }
-  glEnable(GL_LIGHTING);
-}
-
+std::vector<SelectedObject> Renderer::findModelObject(const Vector3d& /*near_pt*/, const Vector3d& /*far_pt*/, int /*mouse_x*/, int /*mouse_y*/, double /*tolerance*/) { return {}; }
 #else //NULLGL
 
-Renderer::Renderer() : colorscheme(nullptr) {}
-void Renderer::resize(int /*w*/, int /*h*/) {}
-bool Renderer::getColor(Renderer::ColorMode colormode, Color4f& col) const { return false; }
-std::string Renderer::loadShaderSource(const std::string& name) { return ""; }
-Renderer::csgmode_e Renderer::get_csgmode(const bool highlight_mode, const bool background_mode, const OpenSCADOperator type) const { return {}; }
-void Renderer::setColor(const float color[4], const shaderinfo_t *shaderinfo) const {}
-Color4f Renderer::setColor(ColorMode colormode, const float color[4], const shaderinfo_t *shaderinfo) const { return {}; }
-void Renderer::setColor(ColorMode colormode, const shaderinfo_t *shaderinfo) const {}
+Renderer::Renderer() : colorscheme_(nullptr) {}
+bool Renderer::getColorSchemeColor(Renderer::ColorMode colormode, Color4f& outcolor) const {return false; }
+bool Renderer::getShaderColor(Renderer::ColorMode colormode, const Color4f& object_color, Color4f& outcolor) const { return false; }
+std::string ShaderUtils::loadShaderSource(const std::string& name) { return ""; }
 void Renderer::setColorScheme(const ColorScheme& cs) {}
-void Renderer::render_surface(const PolySet& ps, csgmode_e csgmode, const Transform3d& m, const shaderinfo_t *shaderinfo) const {}
-void Renderer::render_edges(const PolySet& ps, csgmode_e csgmode) const {}
+std::vector<SelectedObject> Renderer::findModelObject(const Vector3d& /*near_pt*/, const Vector3d& /*far_pt*/, int /*mouse_x*/, int /*mouse_y*/, double /*tolerance*/) { return {}; }
 
 #endif //NULLGL

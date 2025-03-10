@@ -1,19 +1,30 @@
 #pragma once
 
-#include "OffscreenContext.h"
-#include <Eigen/Core>
-#include <Eigen/Geometry>
+#include <stdexcept>
+#include <cstdint>
+#include <memory>
 #include <string>
-#include <iostream>
-#include "GLView.h"
+#include <ostream>
+
+#include "glview/GLView.h"
+#include "glview/OpenGLContext.h"
+#include "glview/fbo.h"
+
+class OffscreenViewException : public std::runtime_error
+{
+public:
+  OffscreenViewException(const std::string& what_arg) : std::runtime_error(what_arg) {}
+};
 
 class OffscreenView : public GLView
 {
 public:
-  OffscreenView(int width, int height);
+  OffscreenView(uint32_t width, uint32_t height);
   ~OffscreenView() override;
   bool save(std::ostream& output) const;
-  OffscreenContext *ctx;
+  // TODO: Do we need to worry about deletion order?
+  std::shared_ptr<OpenGLContext> ctx;
+  std::unique_ptr<FBO> fbo;
 
   // overrides
   bool save(const char *filename) const override;
